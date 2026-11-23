@@ -1,9 +1,13 @@
 {
   "name": "web-visualizer",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs",
+    "vendor": "node scripts/vendor.mjs"
+  },
+  "devDependencies": {
+    "@huggingface/transformers": "^3.0.0"
   }
 }

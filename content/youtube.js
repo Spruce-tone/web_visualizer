@@ -99,7 +99,18 @@
       sendResponse({ ok: false, error: "YouTube 영상 페이지(/watch)에서 실행하세요." });
       return;
     }
-    if (msg.type === "WV_EXTRACT") {
+    if (msg.type === "WV_FOCUS") {
+      const link = msg.id && document.querySelector(`ytd-comments a[href*="lc=${CSS.escape(msg.id)}"]`);
+      const el = link?.closest(SEL.comment);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.style.transition = "outline-color .3s";
+        el.style.outline = "3px solid #4c6ef5";
+        el.style.outlineOffset = "4px";
+        setTimeout(() => (el.style.outline = "3px solid transparent"), 1800);
+      }
+      sendResponse({ ok: !!el });
+    } else if (msg.type === "WV_EXTRACT") {
       try { sendResponse({ ok: true, data: extract() }); }
       catch (e) { sendResponse({ ok: false, error: String(e) }); }
     } else if (msg.type === "WV_LOAD_MORE") {

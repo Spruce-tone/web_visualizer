@@ -7,38 +7,48 @@
 </head>
 <body>
   <header>
-    <h1>Web Visualizer <small>M0</small></h1>
+    <h1>Web Visualizer</h1>
+    <span class="muted">저장 없이 메모리에서만 분석</span>
   </header>
 
   <section class="controls">
-    <button id="btn-extract">현재 보이는 댓글 추출</button>
     <div class="row">
-      <button id="btn-more">자동 스크롤로 더 불러오기</button>
-      <label>최대 <input id="max" type="number" value="300" min="20" step="20" /> 스레드</label>
+      <button id="btn-extract" class="primary">보이는 댓글 분석</button>
+      <button id="btn-more">더 불러와 분석</button>
+      <label>최대 <input id="max" type="number" value="300" min="20" step="20" /></label>
     </div>
-    <button id="btn-export" disabled>JSON 저장 (fixture용)</button>
+    <div class="row">
+      <label>임베딩
+        <select id="embedder">
+          <option value="hash">빠름 · 문자 n-gram</option>
+          <option value="semantic">의미 · e5-small (실험적)</option>
+        </select>
+      </label>
+      <label class="grow">유사도 ≥ <b id="th-val">0.60</b>
+        <input id="th" type="range" min="0.3" max="0.99" step="0.01" value="0.6" />
+      </label>
+    </div>
     <p id="status" class="status"></p>
   </section>
 
-  <section id="doc" hidden>
+  <section id="result" hidden>
     <h2 id="doc-title"></h2>
     <p id="doc-meta" class="muted"></p>
     <div class="stats" id="stats"></div>
-  </section>
 
-  <section id="hist-wrap" hidden>
+    <div class="graph-wrap">
+      <canvas id="graph"></canvas>
+      <div id="tooltip" class="tooltip" hidden></div>
+    </div>
+    <p class="hint muted">노드 = 댓글 (크기: 좋아요, 색: 유사 묶음) · 가운데 큰 점 = 본문 · 드래그 이동 · 휠 확대 · 클릭하면 페이지에서 해당 댓글로 이동</p>
+
+    <h3>유사 댓글 묶음 <span class="muted">의심 신호 점수 높은 순 · 판정이 아닌 참고 지표</span></h3>
+    <ol id="clusters" class="clusters"></ol>
+
     <h3>작성 시각 분포 <span class="muted">(상대시간 기반 근사)</span></h3>
     <div id="hist"></div>
-  </section>
 
-  <section id="top-wrap" hidden>
-    <h3>좋아요 상위 댓글</h3>
-    <ol id="top"></ol>
-  </section>
-
-  <section id="dup-wrap" hidden>
-    <h3>완전히 같은 문구 반복 <span class="muted">(M1에서 유사도 클러스터로 확장)</span></h3>
-    <ul id="dups"></ul>
+    <button id="btn-export" class="link">JSON 내보내기 (개발용 샘플)</button>
   </section>
 
   <script type="module" src="sidepanel.js"></script>

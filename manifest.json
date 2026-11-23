@@ -1,13 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Web Visualizer (M0)",
-  "version": "0.0.1",
-  "description": "웹 문서와 댓글을 수집해 시각화하는 프로토타입. M0: YouTube 댓글 추출.",
-  "permissions": ["sidePanel", "storage", "activeTab", "scripting"],
+  "name": "Web Visualizer",
+  "version": "0.1.0",
+  "description": "웹 문서와 댓글을 임베딩해 유사도 그래프로 시각화. 데이터는 저장하지 않음.",
+  "permissions": ["sidePanel", "activeTab", "scripting"],
   "host_permissions": ["https://www.youtube.com/*"],
   "background": { "service_worker": "background.js" },
   "action": { "default_title": "Web Visualizer 열기" },
   "side_panel": { "default_path": "sidepanel/sidepanel.html" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
