@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Web Visualizer</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header>
+    <h1>Web Visualizer <small>M0</small></h1>
+  </header>
+
+  <section class="controls">
+    <button id="btn-extract">현재 보이는 댓글 추출</button>
+    <div class="row">
+      <button id="btn-more">자동 스크롤로 더 불러오기</button>
+      <label>최대 <input id="max" type="number" value="300" min="20" step="20" /> 스레드</label>
+    </div>
+    <button id="btn-export" disabled>JSON 저장 (fixture용)</button>
+    <p id="status" class="status"></p>
+  </section>
+
+  <section id="doc" hidden>
+    <h2 id="doc-title"></h2>
+    <p id="doc-meta" class="muted"></p>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <section id="hist-wrap" hidden>
+    <h3>작성 시각 분포 <span class="muted">(상대시간 기반 근사)</span></h3>
+    <div id="hist"></div>
+  </section>
+
+  <section id="top-wrap" hidden>
+    <h3>좋아요 상위 댓글</h3>
+    <ol id="top"></ol>
+  </section>
+
+  <section id="dup-wrap" hidden>
+    <h3>완전히 같은 문구 반복 <span class="muted">(M1에서 유사도 클러스터로 확장)</span></h3>
+    <ul id="dups"></ul>
+  </section>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
