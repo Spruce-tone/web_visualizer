@@ -39,11 +39,27 @@ fs.mkdirSync(fontOut, { recursive: true });
 const font = find("node_modules/pretendard", "PretendardVariable.woff2");
 if (font) {
   fs.copyFileSync(font, path.join(fontOut, "PretendardVariable.woff2"));
+  // OFL은 라이선스 문서를 글꼴과 함께 배포해야 한다. 패키지에 없으면 원본 저장소에서 받는다.
+  const licOut = path.join(fontOut, "Pretendard-LICENSE.txt");
   const lic = ["LICENSE", "LICENSE.txt", "OFL.txt"].map((f) => path.join("node_modules/pretendard", f)).find((f) => fs.existsSync(f));
-  if (lic) fs.copyFileSync(lic, path.join(fontOut, "Pretendard-LICENSE.txt"));
-  console.log(`글꼴 복사: ${font}${lic ? " (+라이선스)" : " (라이선스 파일 없음!)"}`);
+  if (lic) fs.copyFileSync(lic, licOut);
+  else {
+    const res = await fetch("https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE");
+    if (!res.ok) { console.error(`Pretendard 라이선스를 받지 못했어요 (${res.status}). 라이선스 없이 글꼴을 배포할 수 없어 중단합니다.`); process.exit(1); }
+    fs.writeFileSync(licOut, await res.text());
+  }
+  console.log(`글꼴 복사: ${font} (+라이선스 ${fs.statSync(licOut).size}바이트)`);
 } else {
   console.warn("Pretendard 글꼴을 찾지 못했어요. 시스템 글꼴로 표시됩니다.");
 }
+
+fs.writeFileSync("vendor/THIRD_PARTY.md", `# 함께 배포되는 외부 구성요소
+
+- Pretendard 글꼴 — SIL Open Font License 1.1 (fonts/Pretendard-LICENSE.txt) — https://github.com/orioncactus/pretendard
+- Transformers.js — Apache License 2.0 — https://github.com/huggingface/transformers.js
+- ONNX Runtime Web — MIT License — https://github.com/microsoft/onnxruntime
+
+의미 모델(Bekko: MIT, EmbeddingGemma: Gemma 이용약관, Qwen3-Embedding: Apache 2.0)은 zip에 들어 있지 않고, 사용자가 처음 실행할 때 Hugging Face에서 직접 내려받습니다.
+`);
 
 console.log(`vendor 완료: transformers.min.js + ort 파일 ${n}개 → ${out}/`);
