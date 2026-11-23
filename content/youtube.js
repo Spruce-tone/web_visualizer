@@ -150,28 +150,56 @@
     return { doc, comments };
   }
 
+  // ---- 댓글의 실제 위치로 이동 ----
+  function highlight(el) {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.style.transition = "outline-color .4s, background-color .4s";
+    el.style.outline = "3px solid #3D6BFF";
+    el.style.outlineOffset = "6px";
+    el.style.borderRadius = "8px";
+    setTimeout(() => (el.style.outlineColor = "transparent"), 2600);
+  }
+
+  function findCommentEl(id) {
+    const link = document.querySelector(`ytd-comments a[href*="lc=${CSS.escape(id)}"]`);
+    return link?.closest(SEL.comment) || null;
+  }
+
+  function focusComment(id) {
+    if (!id) return { ok: false };
+    const el = findCommentEl(id);
+    if (el) { highlight(el); return { ok: true, navigated: false }; }
+    // 아직 화면에 불러오지 않은 댓글: lc 파라미터로 열면 YouTube가 그 댓글(답글이면 스레드째)을 맨 위에 고정해 보여준다.
+    // 새로 열린 뒤 댓글 영역까지 자동으로 내려가도록 표시를 남긴다 (탭을 닫으면 사라지는 sessionStorage, 댓글 내용은 저장하지 않음)
+    try { sessionStorage.setItem("wv_focus", id); } catch { /* 무시 */ }
+    const u = new URL(location.href);
+    u.searchParams.set("lc", id);
+    location.href = u.toString();
+    return { ok: true, navigated: true };
+  }
+
+  async function resumeFocus() {
+    let id = null;
+    try { id = sessionStorage.getItem("wv_focus"); sessionStorage.removeItem("wv_focus"); } catch { /* 무시 */ }
+    if (!id || !/youtube\.com\/watch/.test(location.href)) return;
+    for (let i = 0; i < 60; i++) { // 최대 약 30초
+      const el = findCommentEl(id) || document.querySelector("ytd-comments ytd-comment-thread-renderer");
+      if (el && (findCommentEl(id) || i > 12)) { highlight(findCommentEl(id) || el); return; }
+      // 댓글은 화면 근처로 내려가야 불러와진다
+      (document.querySelector("ytd-comments") || document.documentElement).scrollIntoView({ block: "start" });
+      if (!document.querySelector("ytd-comments")) window.scrollBy(0, 900);
+      await WV.sleep(500);
+    }
+  }
+  resumeFocus();
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!/youtube\.com\/watch/.test(location.href)) {
       sendResponse({ ok: false, error: "YouTube 영상 페이지(/watch)에서 실행하세요." });
       return;
     }
     if (msg.type === "WV_FOCUS") {
-      const link = msg.id && document.querySelector(`ytd-comments a[href*="lc=${CSS.escape(msg.id)}"]`);
-      const el = link?.closest(SEL.comment);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.style.transition = "outline-color .3s";
-        el.style.outline = "3px solid #4c6ef5";
-        el.style.outlineOffset = "4px";
-        setTimeout(() => (el.style.outline = "3px solid transparent"), 1800);
-      }
-      if (!el && msg.id) {
-        // 아직 페이지에 로드되지 않은 댓글 → lc 파라미터로 열면 YouTube가 맨 위에 고정해 보여준다
-        const u = new URL(location.href);
-        u.searchParams.set("lc", msg.id);
-        location.href = u.toString();
-      }
-      sendResponse({ ok: !!el, navigated: !el });
+      sendResponse(focusComment(msg.id));
     } else if (msg.type === "WV_EXTRACT") {
       try { sendResponse({ ok: true, data: extract() }); }
       catch (e) { sendResponse({ ok: false, error: String(e) }); }

@@ -170,4 +170,35 @@ lay2.release(5); lay2.reheat(0.5);
 for (let i = 0; i < 5; i++) lay2.tick();
 assert.ok([...lay2.x, ...lay2.y].every(Number.isFinite));
 
+// --- 키워드 / 추천 기준값 / 배치 계획 ---
+const { topicKeywords, buildStemmer } = await import("../lib/keywords.js");
+const kt = ["이 정책은 정말 문제가 많다", "정책을 다시 검토해야 한다", "정책이 국민을 힘들게 한다", "정부 정책 반대합니다",
+  "고양이가 너무 귀엽다", "고양이는 사랑입니다", "우리 고양이 보고 싶다", "고양이 영상 최고",
+  "편집이 깔끔하네요", "편집 진짜 잘했다", "편집자 월급 올려줘라 편집 최고"];
+const kw = topicKeywords([[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10]], kt);
+assert.equal(kw[0][0], "정책");
+assert.equal(kw[1][0], "고양이", "근거 없는 조사 떼기 금지 (고양이 → 고양 ✗)");
+assert.equal(kw[2][0], "편집");
+const st = buildStemmer([["정책은", "정책을", "고양이", "고양이가"]]);
+assert.equal(st("정책은"), "정책");
+assert.equal(st("고양이"), "고양이");
+
+const { thresholdPresets, thresholdForTopicCount } = await import("../lib/vec.js");
+const knb = topKNeighbors(hashEmbed(kt), 8);
+const ps = thresholdPresets(knb);
+assert.equal(ps.length, 4);
+assert.ok(ps.every((p2, i) => i === 0 || p2.value >= ps[i - 1].value), "추천값은 넓게 → 세밀하게 순으로 커진다");
+const tk = thresholdForTopicCount(knb, 3);
+assert.ok(tk.threshold >= 0.1 && tk.threshold <= 0.99 && tk.count >= 0);
+
+const { planBatches } = await import("../lib/embed/semantic.js");
+const pb = planBatches(["bbb", "a", "bbb", "cc"]);
+assert.deepEqual(pb.unique, ["bbb", "a", "cc"]);
+assert.deepEqual(pb.map, [0, 1, 0, 2]);
+assert.deepEqual(pb.order, [1, 2, 0], "짧은 것부터");
+
+// 손 배치 유지: 기준값만 바꿔 다시 만들 때 좌표·고정 상태를 이어받는다
+const keepL = createLayout(many, [], { keep: { x: lay2.x, y: lay2.y, pin: lay2.pin } });
+assert.equal(keepL.x[7], lay2.x[7]);
+
 console.log("all tests passed");
