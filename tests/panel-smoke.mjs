@@ -77,13 +77,28 @@ assert.ok(V.aSignals.find((a) => a.key === "@repeater").score >= 30, "되풀이 
 assert.ok(V.piles.length >= 1, "비슷한 답글이 몰린 스레드를 찾음");
 assert.equal(api.state().shown, "comments");
 
-// 2) 기준값 변경 → 다시 계산, 손 배치(레이아웃 객체) 유지
+// 주제: k-평균으로 나뉘고, 짧은 반응은 따로 모인다
+assert.ok(V.K >= 2 && V.topics.length >= V.K, "주제가 여러 개로 나뉨");
+assert.ok(V.topics.every((t) => t.short || t.keywords.length), "주제마다 키워드");
+assert.equal(V.anchors.length, V.topics.length, "주제마다 섬(닻)");
+
+// 2) 문구 기준 변경 → 다시 계산, 손 배치와 옮긴 섬 위치 유지
 const before = V.commentLayout;
 before.fix(5, 11, 22);
+before.moveGroup(0, 300, 0);
+const movedAnchorX = before.anchors[0].x;
+const pinnedX = before.x[5]; // 고정한 점이 0번 주제에 속하면 함께 옮겨졌을 수 있다
 byId("th-lex").value = 0.7;
 api.rebuild();
 V = api.state().V;
-assert.equal(V.commentLayout.x[5], 11, "기준값을 바꿔도 손으로 옮긴 위치 유지");
+assert.equal(V.commentLayout.x[5], pinnedX, "문구 기준을 바꿔도 손으로 옮긴 위치 유지");
+assert.equal(V.commentLayout.anchors[0].x, movedAnchorX, "키워드를 끌어 옮긴 주제 위치 유지");
+// 주제 수 변경 → 다시 배치하되 손으로 고정한 점은 그 자리에
+byId("k-range").value = Math.max(2, V.K - 1);
+api.rebuild();
+V = api.state().V;
+assert.equal(V.commentLayout.x[5], pinnedX, "주제 수를 바꿔도 손으로 고정한 점은 유지");
+assert.ok(V.commentLayout.pin[5]);
 
 // 3) 상세 카드, 답글, 색 기준 전환
 const replyIdx = comments.findIndex((c) => c.parentId);
@@ -108,12 +123,22 @@ api.rebuild();
 const snap = JSON.parse(JSON.stringify(api.snapshot()));
 assert.equal(snap.S.comments.length, comments.length);
 assert.equal(snap.pos.x.length, comments.length + 1);
+assert.ok(snap.vecs.b64.length > 0 && snap.pos.anchors.length === api.state().V.anchors.length, "벡터와 섬 위치도 함께 넘어감");
 
 // 6) 댓글 위치로 이동: 답글이면 원댓글 id도 함께 보낸다
 api.showDetail(replyIdx);
 await api.gotoComment();
 const focus = sent.find((m) => m.type === "WV_FOCUS");
 assert.equal(focus.parentId, "P");
+// 화면에 없다고 하면 YouTube 내부 이동을 실행하고, 하이라이트 댓글이 뜨기를 기다린다
+sent.length = 0;
+chrome.tabs.sendMessage = async (_id, msg) => { sent.push(msg); return msg.type === "WV_FOCUS" ? { ok: false, need: "navigate", t: 42, paused: false } : msg.type === "WV_COLLECT_ALL" ? { ok: true, data: structuredClone(fixture) } : { ok: true }; };
+let injected = null;
+chrome.scripting.executeScript = async (opts) => { injected = opts; return [{ result: true }]; };
+await api.gotoComment();
+assert.equal(injected.world, "MAIN");
+assert.deepEqual(injected.args, ["VID", comments[replyIdx].id]);
+assert.equal(sent.find((m) => m.type === "WV_FOCUS_WAIT").t, 42, "보던 위치를 함께 전달");
 // 다른 영상이 열려 있으면 이동하지 않고 안내
 tabUrl = "https://www.youtube.com/watch?v=OTHER";
 sent.length = 0;

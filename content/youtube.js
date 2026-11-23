@@ -104,12 +104,12 @@
   }
 
   /**
-   * @param {{max:number, sort:"top"|"new"|"mix", includeReplies:boolean}} opts
+   * @param {{max:number, sort:"random"|"top"|"new"|"mix", includeReplies:boolean}} opts
    */
   async function collectAll({ max = 1000, sort = "top", includeReplies = true } = {}) {
     cancelled = false;
     const doc = docMeta();
-    const progress = (count, total) => chrome.runtime.sendMessage({ type: "WV_PROGRESS", count, total }).catch(() => {});
+    const progress = (count, total, phase = "") => chrome.runtime.sendMessage({ type: "WV_PROGRESS", count, total, phase }).catch(() => {});
 
     const html = await (await fetch(`/watch?v=${encodeURIComponent(doc.meta.videoId)}`, { credentials: "same-origin" })).text();
     const { cfg, data } = WV.parseWatchHtml(html);
@@ -153,7 +153,39 @@
       if (queue.length || cancelled) complete = false;
     }
 
-    if (sort === "mix" && sortItems.length >= 2) {
+    let pool = null;
+    if (sort === "random" && sortItems.length >= 2) {
+      // 고르게 무작위: 최신순(좋아요와 무관한 순서)으로 원댓글 후보를 넉넉히 훑은 뒤, 씨앗이 정해진 무작위로 뽑는다.
+      // 후보가 영상의 모든 원댓글을 덮으면 전체에서 균등 추출이고, 댓글이 아주 많으면 '최근 N개 중 균등 추출'이 된다.
+      const poolLimit = Math.min(20000, Math.max(max * 3, 1500));
+      const cand = [], seenTop = new Set(), threadEps = new Map();
+      const queue = [sortItems[1].serviceEndpoint];
+      while (queue.length && cand.length < poolLimit && !cancelled) {
+        const r = WV.parseInnertubeComments(await callNext(queue.shift(), cfg), doc.id, { includeReplies });
+        if (r.error && !cand.length) throw new Error(r.error);
+        if (r.total) total = r.total;
+        for (const c of r.comments) { if (!c.parentId && !seenTop.has(c.id)) { seenTop.add(c.id); cand.push(c); } }
+        for (const t of r.threads) if (t.id && t.endpoints.length) threadEps.set(t.id, t.endpoints);
+        queue.push(...r.next);
+        progress(cand.length, total, "후보 확인");
+        await WV.sleep(50);
+      }
+      pool = { size: cand.length, complete: !queue.length && !cancelled };
+      for (const top of WV.seededShuffle(cand, doc.meta.videoId)) {
+        if (comments.length >= max || cancelled) break;
+        seen.add(top.id);
+        comments.push(top);
+        const rq = includeReplies ? [...(threadEps.get(top.id) || [])] : [];
+        while (rq.length && comments.length < max && !cancelled) { // 뽑힌 스레드의 답글만 받는다
+          const r = WV.parseInnertubeComments(await callNext(rq.shift(), cfg), doc.id, { includeReplies: true });
+          for (const c of r.comments) { if (c.parentId && !seen.has(c.id) && comments.length < max) { seen.add(c.id); comments.push(c); } }
+          rq.push(...r.replies);
+          progress(comments.length, total, "답글 받는 중");
+          await WV.sleep(50);
+        }
+      }
+      complete = pool.complete && !cancelled;
+    } else if (sort === "mix" && sortItems.length >= 2) {
       // 인기순 절반 + 최신순 절반: 좋아요 많은 댓글 쪽으로만 치우치지 않게
       await drain(sortItems[0].serviceEndpoint, Math.ceil(max / 2));
       const topDone = complete;
@@ -164,7 +196,7 @@
       await drain(sortItems[sort === "new" ? 1 : 0]?.serviceEndpoint, max);
     }
     doc.meta.totalComments = total;
-    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled, complete };
+    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled, complete, pool };
     return { doc, comments };
   }
 
@@ -197,6 +229,35 @@
   const say = (text) => chrome.runtime.sendMessage({ type: "WV_FIND_PROGRESS", text }).catch(() => {});
 
   /**
+   * YouTube 내부 이동(yt-navigate) 직후: 영상 위치를 되돌리고, 댓글 영역 맨 위에 뜨는 '하이라이트 댓글/답글'을 기다렸다가 강조한다.
+   * 페이지는 새로고침되지 않는다. (실제 페이지에서 2~3초 안에 뜨는 것을 확인)
+   */
+  async function waitForLinked({ id, t = 0, paused = false, timeoutMs = 15000 }) {
+    findCancelled = false;
+    const deadline = Date.now() + timeoutMs;
+    let restored = false;
+    await WV.sleep(400);
+    while (Date.now() < deadline && !findCancelled) {
+      const v = document.querySelector("video");
+      // 내부 이동을 하면 영상이 처음부터 다시 시작한다 → 보던 위치로 되돌린다
+      if (!restored && v && v.readyState >= 1 && t > 3 && v.currentTime < t - 2) {
+        try { v.currentTime = t; if (paused) v.pause(); restored = true; } catch { /* 무시 */ }
+      }
+      const section = document.querySelector("ytd-comments");
+      const el = findCommentEl(id);
+      if (el) {
+        if (!restored && v && t > 3 && v.currentTime < t - 2) { try { v.currentTime = t; if (paused) v.pause(); } catch { /* 무시 */ } }
+        highlight(el);
+        return { ok: true };
+      }
+      if (section && !document.querySelector("ytd-comments ytd-comment-thread-renderer")) section.scrollIntoView({ block: "start" }); // 댓글은 화면 근처에 와야 불러온다
+      await WV.sleep(250);
+    }
+    return { ok: false, reason: findCancelled ? "찾기를 멈췄어요." : "댓글이 뜨지 않았어요. 삭제됐거나 숨겨진 댓글일 수 있어요." };
+  }
+
+  /**
+   * (예비 방법) 내부 이동을 쓸 수 없을 때만: 댓글 영역을 내려가며 찾는다. 느리다.
    * 1) 이미 있으면 바로 이동  2) 없으면 댓글 영역을 내려가며 원댓글(또는 그 댓글)을 불러옴
    * 3) 답글이면 스레드의 "답글 N개"와 "답글 더보기"를 눌러 가며 찾음
    */
@@ -254,12 +315,26 @@
     return { ok: false, reason: Date.now() >= deadline ? "시간 안에 찾지 못했어요. 댓글이 아주 아래쪽에 있을 수 있어요." : "페이지에서 이 댓글을 찾지 못했어요. 삭제됐거나 정렬 방식에 따라 보이지 않을 수 있어요." };
   }
 
+  // 개발·점검용 (background.js 참고)
+  const devOpen = () => { if (location.hash === "#wv-dev-open") { history.replaceState(history.state, "", location.href.replace(/#wv-dev-open$/, "")); chrome.runtime.sendMessage({ type: "WV_DEV_OPEN" }).catch(() => {}); } };
+  window.addEventListener("hashchange", devOpen);
+  devOpen();
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!/youtube\.com\/watch/.test(location.href)) {
       sendResponse({ ok: false, error: "YouTube 영상 페이지(/watch)에서 실행하세요." });
       return;
     }
     if (msg.type === "WV_FOCUS") {
+      // 1단계(즉시): 이미 화면에 있으면 바로 이동. 없으면 패널이 YouTube의 내부 이동으로 '하이라이트 댓글'을 불러온다.
+      const el = findCommentEl(msg.id);
+      if (el) { highlight(el); sendResponse({ ok: true }); return; }
+      const v = document.querySelector("video");
+      sendResponse({ ok: false, need: "navigate", videoId: videoId(), t: v ? v.currentTime : 0, paused: v ? v.paused : true });
+    } else if (msg.type === "WV_FOCUS_WAIT") {
+      waitForLinked(msg).then(sendResponse, (e) => sendResponse({ ok: false, reason: String(e.message || e) }));
+      return true;
+    } else if (msg.type === "WV_FOCUS_SCAN") {
       locateComment(msg.id, msg.parentId).then(sendResponse, (e) => sendResponse({ ok: false, reason: String(e.message || e) }));
       return true; // 비동기 응답
     } else if (msg.type === "WV_FIND_CANCEL") {

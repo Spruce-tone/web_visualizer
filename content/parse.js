@@ -63,7 +63,7 @@ WV.first = (obj, key) => { for (const v of WV.searchDict(obj, key)) return v; re
  *   next: 다음 페이지 endpoint[], replies: 답글 스레드 endpoint[]
  */
 WV.parseInnertubeComments = function (response, docId, { includeReplies = true, now = Date.now() } = {}) {
-  const out = { comments: [], next: [], replies: [], total: null, error: null };
+  const out = { comments: [], next: [], replies: [], threads: [], total: null, error: null };
   out.error = WV.first(response, "externalErrorMessage") || null;
 
   const header = WV.first(response, "commentsHeaderRenderer");
@@ -78,7 +78,13 @@ WV.parseInnertubeComments = function (response, docId, { includeReplies = true, 
     for (const item of action.continuationItems || []) {
       if (/comments-section/.test(target)) {
         if (item.continuationItemRenderer) out.next.push(...WV.searchDict(item.continuationItemRenderer, "continuationEndpoint"));
-        else if (includeReplies && item.commentThreadRenderer?.replies) out.replies.push(...WV.searchDict(item.commentThreadRenderer.replies, "continuationEndpoint"));
+        else if (item.commentThreadRenderer) {
+          const tr = item.commentThreadRenderer;
+          const eps = includeReplies && tr.replies ? [...WV.searchDict(tr.replies, "continuationEndpoint")] : [];
+          out.replies.push(...eps);
+          // 스레드별 답글 주소 (무작위 추출 때 뽑힌 스레드의 답글만 받으려고)
+          out.threads.push({ id: WV.first(tr.commentViewModel || tr, "commentId") || null, endpoints: eps });
+        }
       } else if (includeReplies && target.startsWith("comment-replies-item") && item.continuationItemRenderer) {
         const btn = WV.first(item.continuationItemRenderer, "buttonRenderer");
         if (btn?.command) out.replies.push(btn.command);
@@ -116,6 +122,23 @@ WV.parseInnertubeComments = function (response, docId, { includeReplies = true, 
     });
   }
   return out;
+};
+
+/** 씨앗 문자열로 정해지는 섞기 (같은 영상·같은 후보면 항상 같은 표본 → 결과 재현 가능) */
+WV.seededShuffle = function (arr, seed) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  let a = h >>> 0;
+  const rand = () => { a = (a + 0x6d2b79f5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  return out;
+};
+
+/** YouTube가 '하이라이트 댓글'로 이동할 때 쓰는 params: protobuf { 15: 댓글 id, 36: { 24: 0 } } 를 base64 → URL 인코딩 (실제 페이지 값과 일치 확인) */
+WV.linkedCommentParams = function (id) {
+  const bytes = [122, id.length, ...[...id].map((c) => c.charCodeAt(0)), 162, 2, 3, 192, 1, 0];
+  return encodeURIComponent(btoa(String.fromCharCode(...bytes)));
 };
 
 /** watch 페이지 HTML에서 ytcfg / ytInitialData 추출 */

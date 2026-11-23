@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { timeHistogram, exactDuplicates, normalize } from "../lib/analyze.js";
 
 // content/parse.js 를 브라우저 전역처럼 로드
-const ctx = { globalThis: {}, setTimeout };
+const ctx = { globalThis: {}, setTimeout, btoa, atob, URL };
 ctx.globalThis = ctx;
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(new URL("../content/parse.js", import.meta.url), "utf8"), ctx);
@@ -369,5 +369,54 @@ assert.ok(validateWeights(mergeWeights(DEFAULT_WEIGHTS, cal.override)), "보정 
 assert.ok(cal.report.auc > 0.9, `합성 데이터에서 분리 가능 (AUC ${cal.report.auc})`);
 assert.ok(!JSON.stringify(cal.override).match(/tone|condemn|praise/i), "보정 프로필에도 어조 항목이 없다");
 assert.throws(() => calibrateAuthorWeights(synth.slice(0, 30)), "데이터가 부족하면 거부");
+
+// ---- 주제 묶기(k-평균), 섬 배치, 무작위 추출 ----
+const { kmeans, suggestK, isShortReaction, representatives } = await import("../lib/cluster.js");
+const { placeAnchors } = await import("../lib/layout.js");
+const { neighborsFast, packVectors, unpackVectors } = await import("../lib/vec.js");
+const three = [];
+for (let i = 0; i < 90; i++) three.push(["정부 정책 세금 예산 국회 논의", "고양이 강아지 귀여운 동물 영상", "게임 공략 보스 아이템 레벨"][i % 3] + ` 이야기 ${i}`);
+const tv = hashEmbed(three);
+const km = kmeans(tv, 3);
+assert.equal(km.centroids.length, 3);
+assert.deepEqual(km.sizes, [30, 30, 30], "세 주제가 정확히 갈라진다");
+assert.ok([0, 3, 6].every((i) => km.ids[i] === km.ids[0]) && km.ids[0] !== km.ids[1], "같은 주제는 같은 묶음");
+assert.deepEqual(Array.from(kmeans(tv, 3).ids), Array.from(km.ids), "같은 입력이면 같은 묶음 (결정적)");
+assert.ok(representatives(tv, km.ids, km.centroids).every((i) => i >= 0));
+assert.equal(isShortReaction("lol"), true);
+assert.equal(isShortReaction("ㅋㅋㅋㅋㅋㅋㅋㅋㅋㅋ"), true);
+assert.equal(isShortReaction("이 영상 정말 잘 만들었네요"), false);
+assert.ok(suggestK(1000) >= 10 && suggestK(1000) <= 20 && suggestK(10) >= 2);
+
+const anc = placeAnchors([[0, 0], [0.01, 0], [1, 1], [-1, 0.5]], [300, 200, 50, 10]);
+for (let i = 0; i < anc.length; i++) {
+  assert.ok(Math.hypot(anc[i].x, anc[i].y) >= anc[i].r, "가운데(본문)와 겹치지 않음");
+  for (let j = i + 1; j < anc.length; j++) assert.ok(Math.hypot(anc[i].x - anc[j].x, anc[i].y - anc[j].y) >= anc[i].r + anc[j].r + 30, "섬끼리 떨어져 있음");
+}
+const gl = createLayout(three.map(() => [0, 0]), [], { groups: Array.from(km.ids), anchors: placeAnchors([[1, 0], [-1, 0], [0, 1]], km.sizes) });
+for (let i = 0; i < 150 && gl.tick(); i++);
+assert.ok(three.every((_, i) => { const a = gl.anchors[km.ids[i]]; return Math.hypot(gl.x[i] - a.x, gl.y[i] - a.y) <= a.r * 1.15; }), "모든 점이 자기 섬 안에");
+const gx = gl.x[0];
+gl.moveGroup(km.ids[0], 100, -40);
+assert.ok(Math.abs(gl.x[0] - gx - 100) < 1e-3 && three.every((_, i) => km.ids[i] === km.ids[0] || gl.x[i] !== undefined), "키워드를 끌면 그 주제의 점이 함께 이동");
+
+const nf = await neighborsFast(tv, 5, { exactLimit: 20, partition: kmeans });
+assert.ok(nf.every((l) => l.length === 5 && l[0].sim >= l[4].sim));
+const packed = unpackVectors(JSON.parse(JSON.stringify(packVectors(tv.slice(0, 4)))));
+assert.equal(packed[3][7], tv[3][7], "벡터 묶기·풀기");
+
+const sh1 = WV.seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], "VID"), sh2 = WV.seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], "VID");
+assert.equal(JSON.stringify(sh1), JSON.stringify(sh2), "같은 씨앗이면 같은 순서");
+assert.notEqual(JSON.stringify(sh1), JSON.stringify(WV.seededShuffle([1, 2, 3, 4, 5, 6, 7, 8], "OTHER")));
+assert.equal([...sh1].sort().join(""), "12345678");
+// 무작위 추출이 치우치지 않는지: 여러 씨앗에서 앞쪽 절반에 뽑히는 빈도가 원소마다 비슷해야 한다
+const freq = new Array(8).fill(0);
+for (let sd2 = 0; sd2 < 400; sd2++) WV.seededShuffle([0, 1, 2, 3, 4, 5, 6, 7], "seed" + sd2).slice(0, 4).forEach((x) => freq[x]++);
+assert.ok(freq.every((f) => f > 150 && f < 250), `균등 추출 (${freq})`);
+assert.equal(WV.linkedCommentParams("Ugxx6fT6wNdMlJLrBuJ4AaABAg").length, 52, "하이라이트 댓글 params (실제 YouTube 값과 같은 길이)");
+// 스레드별 답글 주소
+sample.onResponseReceivedEndpoints[0].reloadContinuationItemsCommand.continuationItems[1].commentThreadRenderer.commentViewModel = { commentViewModel: { commentId: "Ugx1" } };
+const pr2 = WV.parseInnertubeComments(sample, "youtube:x", { now });
+assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])), '[["Ugx1",1]]');
 
 console.log("all tests passed");

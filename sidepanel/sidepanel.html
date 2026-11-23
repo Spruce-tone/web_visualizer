@@ -37,7 +37,8 @@
       </label>
       <label class="field"><span>모으는 순서</span>
         <select id="sort">
-          <option value="mix" selected>인기순+최신순 반반</option>
+          <option value="random" selected>고르게 무작위</option>
+          <option value="mix">인기순+최신순 반반</option>
           <option value="top">인기순</option>
           <option value="new">최신순</option>
         </select>
@@ -105,19 +106,16 @@
 
       <div class="grain" id="grain">
         <div class="grain-head">
-          <span class="label">주제를 얼마나 잘게 나눌까요</span>
-          <span class="value">의미 유사도 <b id="th-sem-val"></b> 이상</span>
-        </div>
-        <div id="presets" class="seg" role="group" aria-label="추천 기준"></div>
-        <input id="th-sem" type="range" min="-0.5" max="0.99" step="0.01" aria-label="주제 묶음 기준" />
-        <div class="grain-count">
-          <span>주제 수로 맞추기</span>
+          <span class="label">주제를 몇 개로 나눌까요</span>
           <div class="stepper">
             <button id="k-minus" class="chip-btn" aria-label="주제 수 줄이기">−</button>
             <output id="k-val">–</output>
             <button id="k-plus" class="chip-btn" aria-label="주제 수 늘리기">+</button>
           </div>
         </div>
+        <div id="presets" class="seg" role="group" aria-label="추천 주제 수"></div>
+        <input id="k-range" type="range" min="2" max="40" step="1" value="8" aria-label="주제 수" />
+        <p class="note">지도의 키워드를 끌면 그 주제의 댓글이 통째로 따라옵니다. 키워드를 누르면 그 주제의 댓글이 모두 선택돼요.</p>
       </div>
 
       <article id="detail" class="detail" hidden>
@@ -149,7 +147,8 @@
         <summary>지도 보는 법과 조작법</summary>
         <ul>
           <li>점이 클수록 좋아요가 많은 댓글입니다 (이 영상 안에서의 상대 크기). 작성자 지도에서는 댓글을 많이 쓴 사람일수록 큽니다.</li>
-          <li>가까이 모인 점은 내용이 비슷한 댓글입니다. 색은 주제 묶음이에요.</li>
+          <li>주제마다 섬처럼 떨어져 있습니다. 섬 위의 키워드를 끌면 그 주제 전체가 움직이고, 키워드를 누르면 그 주제의 댓글이 모두 선택돼요.</li>
+          <li>"짧은 반응" 섬에는 ㅋㅋ, lol, 이모지처럼 뜻으로 묶기 어려운 댓글을 따로 모았습니다.</li>
           <li>점을 누르면 내용이 아래에 열리고, 거기서 페이지의 실제 위치로 갈 수 있어요.</li>
           <li>점을 끌면 그 자리에 고정되고 이웃이 따라옵니다. 더블클릭하면 풀려요.</li>
           <li>Shift+드래그는 영역 선택, Shift+클릭은 하나씩 추가, Esc는 선택 해제. 빈 곳을 끌면 이동, 휠로 확대·축소.</li>
