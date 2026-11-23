@@ -104,7 +104,7 @@
   }
 
   /**
-   * @param {{max:number, sort:"top"|"new", includeReplies:boolean}} opts
+   * @param {{max:number, sort:"top"|"new"|"mix", includeReplies:boolean}} opts
    */
   async function collectAll({ max = 1000, sort = "top", includeReplies = true } = {}) {
     cancelled = false;
@@ -114,84 +114,145 @@
     const html = await (await fetch(`/watch?v=${encodeURIComponent(doc.meta.videoId)}`, { credentials: "same-origin" })).text();
     const { cfg, data } = WV.parseWatchHtml(html);
     if (!cfg.INNERTUBE_CONTEXT || !data) throw new Error("YouTube 설정을 읽지 못했어요.");
+    const fresh = WV.parseWatchMeta(html);
+    if (fresh.title) doc.title = fresh.title;
+    if (fresh.channel) doc.author = fresh.channel;
+    if (fresh.description) doc.text = fresh.description.slice(0, 5000);
 
     // 댓글 섹션 → 정렬 메뉴(인기/최신) endpoint
     const section = [...WV.searchDict(data, "itemSectionRenderer")].find((s) => WV.first(s, "continuationItemRenderer"));
     if (!section) throw new Error("댓글이 꺼져 있거나 찾을 수 없어요.");
     let first = await callNext(WV.first(WV.first(section, "continuationItemRenderer"), "continuationEndpoint"), cfg);
     const sortItems = WV.first(first, "sortFilterSubMenuRenderer")?.subMenuItems || [];
-    const sortEndpoint = sortItems[sort === "new" ? 1 : 0]?.serviceEndpoint;
-
-    const queue = [];
     const comments = [];
     const seen = new Set();
     let total = null;
-    let pending = sortEndpoint ? null : first; // 정렬 메뉴가 없으면 첫 응답부터 바로 사용
-    if (sortEndpoint) queue.push(sortEndpoint);
+    let complete = true;
 
-    while ((pending || queue.length) && comments.length < max && !cancelled) {
-      const resp = pending || (await callNext(queue.shift(), cfg));
-      pending = null;
-      const r = WV.parseInnertubeComments(resp, doc.id, { includeReplies });
-      if (r.error && !comments.length) throw new Error(r.error);
-      if (r.total) total = r.total;
-      for (const c of r.comments) {
-        if (seen.has(c.id) || comments.length >= max) continue;
-        seen.add(c.id);
-        comments.push(c);
+    // 한 가지 정렬로 limit 개까지 모은다
+    async function drain(sortEndpoint, limit) {
+      const queue = [];
+      let pending = sortEndpoint ? null : first; // 정렬 메뉴가 없으면 첫 응답부터 바로 사용
+      if (sortEndpoint) queue.push(sortEndpoint);
+      while ((pending || queue.length) && comments.length < limit && !cancelled) {
+        const resp = pending || (await callNext(queue.shift(), cfg));
+        pending = null;
+        const r = WV.parseInnertubeComments(resp, doc.id, { includeReplies });
+        if (r.error && !comments.length) throw new Error(r.error);
+        if (r.total) total = r.total;
+        for (const c of r.comments) {
+          if (seen.has(c.id) || comments.length >= limit) continue;
+          seen.add(c.id);
+          comments.push(c);
+        }
+        queue.unshift(...r.replies); // 답글을 먼저 받아 스레드를 붙여서 수집
+        queue.push(...r.next);
+        progress(comments.length, total);
+        await WV.sleep(120); // 서버 부담 줄이기
       }
-      queue.unshift(...r.replies); // 답글을 먼저 받아 스레드를 붙여서 수집
-      queue.push(...r.next);
-      progress(comments.length, total);
-      await WV.sleep(120); // 서버 부담 줄이기
+      if (queue.length || cancelled) complete = false;
+    }
+
+    if (sort === "mix" && sortItems.length >= 2) {
+      // 인기순 절반 + 최신순 절반: 좋아요 많은 댓글 쪽으로만 치우치지 않게
+      await drain(sortItems[0].serviceEndpoint, Math.ceil(max / 2));
+      const topDone = complete;
+      complete = true;
+      if (!topDone && !cancelled) await drain(sortItems[1].serviceEndpoint, max);
+      else complete = topDone;
+    } else {
+      await drain(sortItems[sort === "new" ? 1 : 0]?.serviceEndpoint, max);
     }
     doc.meta.totalComments = total;
-    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled, complete: !queue.length && !cancelled };
+    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled, complete };
     return { doc, comments };
   }
 
-  // ---- 댓글의 실제 위치로 이동 ----
+  // ---- 댓글의 실제 위치로 이동 (페이지를 다시 열지 않는다) ----
+  let findCancelled = false;
+
   function highlight(el) {
+    // 길어서 접힌 댓글이면 "자세히 보기"를 눌러 펼친다
+    const more = el.querySelector("#more:not([hidden]), tp-yt-paper-button#more:not([hidden]), .more-button:not([hidden])");
+    if (more && more.offsetParent !== null) more.click();
     el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.style.transition = "outline-color .4s, background-color .4s";
+    el.style.transition = "outline-color .4s";
     el.style.outline = "3px solid #3D6BFF";
     el.style.outlineOffset = "6px";
     el.style.borderRadius = "8px";
-    setTimeout(() => (el.style.outlineColor = "transparent"), 2600);
+    setTimeout(() => (el.style.outlineColor = "transparent"), 3000);
   }
 
+  /** lc 값이 정확히 일치하는 댓글 요소 (접두어만 같은 답글 링크에 속지 않게 값 비교) */
   function findCommentEl(id) {
-    const link = document.querySelector(`ytd-comments a[href*="lc=${CSS.escape(id)}"]`);
-    return link?.closest(SEL.comment) || null;
-  }
-
-  function focusComment(id) {
-    if (!id) return { ok: false };
-    const el = findCommentEl(id);
-    if (el) { highlight(el); return { ok: true, navigated: false }; }
-    // 아직 화면에 불러오지 않은 댓글: lc 파라미터로 열면 YouTube가 그 댓글(답글이면 스레드째)을 맨 위에 고정해 보여준다.
-    // 새로 열린 뒤 댓글 영역까지 자동으로 내려가도록 표시를 남긴다 (탭을 닫으면 사라지는 sessionStorage, 댓글 내용은 저장하지 않음)
-    try { sessionStorage.setItem("wv_focus", id); } catch { /* 무시 */ }
-    const u = new URL(location.href);
-    u.searchParams.set("lc", id);
-    location.href = u.toString();
-    return { ok: true, navigated: true };
-  }
-
-  async function resumeFocus() {
-    let id = null;
-    try { id = sessionStorage.getItem("wv_focus"); sessionStorage.removeItem("wv_focus"); } catch { /* 무시 */ }
-    if (!id || !/youtube\.com\/watch/.test(location.href)) return;
-    for (let i = 0; i < 60; i++) { // 최대 약 30초
-      const el = findCommentEl(id) || document.querySelector("ytd-comments ytd-comment-thread-renderer");
-      if (el && (findCommentEl(id) || i > 12)) { highlight(findCommentEl(id) || el); return; }
-      // 댓글은 화면 근처로 내려가야 불러와진다
-      (document.querySelector("ytd-comments") || document.documentElement).scrollIntoView({ block: "start" });
-      if (!document.querySelector("ytd-comments")) window.scrollBy(0, 900);
-      await WV.sleep(500);
+    for (const a of document.querySelectorAll(`ytd-comments a[href*="lc="]`)) {
+      let lc = null;
+      try { lc = new URL(a.getAttribute("href"), location.origin).searchParams.get("lc"); } catch { /* 무시 */ }
+      if (lc === id) { const el = a.closest(SEL.comment); if (el) return el; }
     }
+    return null;
   }
-  resumeFocus();
+
+  const topThreads = () => document.querySelectorAll("ytd-comments ytd-comment-thread-renderer").length;
+  const say = (text) => chrome.runtime.sendMessage({ type: "WV_FIND_PROGRESS", text }).catch(() => {});
+
+  /**
+   * 1) 이미 있으면 바로 이동  2) 없으면 댓글 영역을 내려가며 원댓글(또는 그 댓글)을 불러옴
+   * 3) 답글이면 스레드의 "답글 N개"와 "답글 더보기"를 눌러 가며 찾음
+   */
+  async function locateComment(id, parentId, { timeoutMs = 60000 } = {}) {
+    findCancelled = false;
+    let el = findCommentEl(id);
+    if (el) { highlight(el); return { ok: true }; }
+
+    const section = document.querySelector("ytd-comments");
+    if (!section) return { ok: false, reason: "이 페이지에서 댓글 영역을 찾지 못했어요." };
+    section.scrollIntoView({ block: "start" });
+    const deadline = Date.now() + timeoutMs;
+    const anchorId = parentId || id;
+    let thread = null, last = -1, idle = 0;
+
+    while (Date.now() < deadline && !findCancelled) {
+      el = findCommentEl(id);
+      if (el) { highlight(el); return { ok: true }; }
+      const anchor = findCommentEl(anchorId);
+      if (anchor) { thread = anchor.closest("ytd-comment-thread-renderer"); break; }
+      const n = topThreads();
+      idle = n === last ? idle + 1 : 0;
+      last = n;
+      if (idle >= 10) break; // 더 불러올 댓글이 없음
+      say(`페이지에서 댓글을 찾는 중 (${n.toLocaleString()}개까지 불러옴)`);
+      const conts = [...section.querySelectorAll("ytd-continuation-item-renderer")].filter((c) => !c.closest("ytd-comment-replies-renderer"));
+      const target = conts.pop() || section.querySelector("ytd-comment-thread-renderer:last-of-type") || section;
+      target.scrollIntoView({ block: "center" });
+      await WV.sleep(650);
+    }
+
+    if (parentId && thread && !findCancelled) {
+      say("답글을 펼치는 중");
+      thread.scrollIntoView({ block: "center" });
+      const replyCount = () => thread.querySelectorAll("ytd-comment-replies-renderer ytd-comment-view-model, ytd-comment-replies-renderer ytd-comment-renderer").length;
+      if (replyCount() === 0) {
+        thread.querySelector("#more-replies button, #more-replies-sub-thread button, ytd-comment-replies-renderer #expander button")?.click();
+        await WV.sleep(900);
+      }
+      let lastR = -1, idleR = 0;
+      while (Date.now() < deadline && !findCancelled) {
+        el = findCommentEl(id);
+        if (el) { highlight(el); return { ok: true }; }
+        const moreBtn = thread.querySelector("ytd-comment-replies-renderer ytd-continuation-item-renderer button");
+        if (moreBtn) { moreBtn.scrollIntoView({ block: "center" }); moreBtn.click(); }
+        const r = replyCount();
+        idleR = r === lastR && !moreBtn ? idleR + 1 : 0;
+        lastR = r;
+        if (idleR >= 6) break;
+        say(`답글을 펼치는 중 (${r}개 확인)`);
+        await WV.sleep(700);
+      }
+    }
+    if (findCancelled) return { ok: false, reason: "찾기를 멈췄어요." };
+    return { ok: false, reason: Date.now() >= deadline ? "시간 안에 찾지 못했어요. 댓글이 아주 아래쪽에 있을 수 있어요." : "페이지에서 이 댓글을 찾지 못했어요. 삭제됐거나 정렬 방식에 따라 보이지 않을 수 있어요." };
+  }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!/youtube\.com\/watch/.test(location.href)) {
@@ -199,7 +260,11 @@
       return;
     }
     if (msg.type === "WV_FOCUS") {
-      sendResponse(focusComment(msg.id));
+      locateComment(msg.id, msg.parentId).then(sendResponse, (e) => sendResponse({ ok: false, reason: String(e.message || e) }));
+      return true; // 비동기 응답
+    } else if (msg.type === "WV_FIND_CANCEL") {
+      findCancelled = true;
+      sendResponse({ ok: true });
     } else if (msg.type === "WV_EXTRACT") {
       try { sendResponse({ ok: true, data: extract() }); }
       catch (e) { sendResponse({ ok: false, error: String(e) }); }

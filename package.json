@@ -1,11 +1,13 @@
 {
   "name": "web-visualizer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/run.mjs",
-    "vendor": "node scripts/vendor.mjs"
+    "test": "node tests/run.mjs && node tests/panel-smoke.mjs",
+    "vendor": "node scripts/vendor.mjs",
+    "calibrate": "node scripts/calibrate.mjs",
+    "evaluate": "node scripts/evaluate.mjs"
   },
   "devDependencies": {
     "@huggingface/transformers": "^3.7.0",

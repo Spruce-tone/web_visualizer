@@ -1,13 +1,23 @@
-// 캔버스 그래프 — 밤하늘 지도처럼 어두운 판 위에 댓글을 점으로 찍는다 (옵시디언 그래프 뷰처럼 손으로 배치·분류)
+// 캔버스 지도 — 댓글(또는 작성자)을 점으로 찍는다. 밝은 배경이 기본, 어둡게 전환 가능 (옵시디언 그래프 뷰처럼 손으로 배치·분류)
 // 조작
 //   빈 곳 드래그: 화면 이동 · 휠: 확대/축소
 //   점 클릭: 그 댓글 선택(onPick) · 점 드래그: 옮기고 그 자리에 고정(이웃은 따라 움직임)
 //   Shift+드래그(빈 곳): 영역 선택 · Shift+클릭: 선택 추가/해제 · Esc: 선택 해제
 //   숫자키 1~9: 선택한 점을 분류에 넣기 · 0: 분류 빼기 · 더블클릭: 고정 해제
 
-export const TOPIC_COLORS = ["#7C9CFF", "#FF9F5A", "#5BD68A", "#D08CFF", "#4FD1D9", "#FFC94A", "#FF7FA8", "#A6D34B", "#9E8CFF", "#59B8E8"];
+// 밝은 지도가 기본. 색은 밝은 배경에서 또렷하게 보이는 진한 색
+const PALETTES = {
+  light: ["#3B5BDB", "#E8590C", "#2B8A3E", "#9C36B5", "#0B7285", "#B8860B", "#C2255C", "#5C7A0D", "#6741D9", "#1864AB"],
+  dark: ["#7C9CFF", "#FF9F5A", "#5BD68A", "#D08CFF", "#4FD1D9", "#FFC94A", "#FF7FA8", "#A6D34B", "#9E8CFF", "#59B8E8"],
+};
+const THEMES = {
+  light: { reply: "150,95,10", edge: "70,90,130", lone: "#8D98AB", doc: "#18202F", flag: "#D9480F", ink: "#18202F", halo: "rgba(255,255,255,.92)", select: "#18202F", edgeBase: 0.16 },
+  dark: { reply: "255,200,120", edge: "150,170,215", lone: "#56627A", doc: "#FFFFFF", flag: "#FF8A3D", ink: "#E8EDF7", halo: "rgba(10,15,28,.82)", select: "#FFFFFF", edgeBase: 0.1 },
+};
+export const TOPIC_COLORS = PALETTES.light; // 목록·배지에서 쓰는 주제 색 (지도와 같은 순서)
 export const TAG_COLORS = ["#FF5A5F", "#3DA5FF", "#3ED598", "#FFB020", "#C77DFF", "#00C2C7", "#FF8FB1", "#B4D335", "#F06FD5"];
-const MAP = { reply: "255,200,120", edge: "150,170,215", lone: "#56627A", doc: "#FFFFFF", flag: "#FF8A3D", ink: "#E8EDF7", halo: "rgba(10,15,28,.82)", select: "#FFFFFF" };
+let MAP = THEMES.light;
+let PAL = PALETTES.light;
 
 export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelectionChange } = {}) {
   const ctx = canvas.getContext("2d");
@@ -33,8 +43,9 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     draw();
   }
 
-  const radius = (nd) => (nd.kind === "doc" ? 8 : 2.6 + Math.min(6, Math.log10((nd.likes || 0) + 1) * 2));
-  const color = (nd) => (nd.kind === "doc" ? MAP.doc : nd.cluster >= 0 ? TOPIC_COLORS[nd.cluster % TOPIC_COLORS.length] : MAP.lone);
+  // 크기: weight(0~1, 그 영상 안에서의 상대적 좋아요·댓글 수)에 따라 3 ~ 17px. 차이가 눈에 띄게 1.4제곱
+  const radius = (nd) => (nd.kind === "doc" ? 9 : 3 + 14 * Math.pow(nd.weight || 0, 1.4));
+  const color = (nd) => (nd.kind === "doc" ? MAP.doc : nd.tint ? nd.tint[MAP === THEMES.dark ? 1 : 0] : nd.cluster >= 0 ? PAL[nd.cluster % PAL.length] : MAP.lone);
   function toScreen(i) {
     const { width, height } = rect();
     return [data.layout.x[i] * view.k + width / 2 + view.tx, data.layout.y[i] * view.k + height / 2 + view.ty];
@@ -53,7 +64,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       if (!s) sum.set(nd.cluster, (s = [0, 0, 0]));
       s[0] += data.layout.x[i]; s[1] += data.layout.y[i]; s[2]++;
     });
-    ctx.font = "600 11.5px Pretendard, system-ui, sans-serif";
+    ctx.font = "650 12.5px Pretendard, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     for (const { cluster, text } of data.labels) {
@@ -62,10 +73,10 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       const x = (s[0] / s[2]) * view.k + width / 2 + view.tx;
       const y = (s[1] / s[2]) * view.k + height / 2 + view.ty;
       if (x < 0 || y < 0 || x > width || y > height) continue;
-      const w = ctx.measureText(text).width + 14;
+      const w = ctx.measureText(text).width + 16;
       ctx.fillStyle = MAP.halo;
-      ctx.beginPath(); ctx.roundRect(x - w / 2, y - 10, w, 20, 10); ctx.fill();
-      ctx.fillStyle = TOPIC_COLORS[cluster % TOPIC_COLORS.length];
+      ctx.beginPath(); ctx.roundRect(x - w / 2, y - 11, w, 22, 11); ctx.fill();
+      ctx.fillStyle = PAL[cluster % PAL.length];
       ctx.fillText(text, x, y + 0.5);
     }
   }
@@ -82,7 +93,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     for (const e of edges) {
       const [x1, y1] = toScreen(e.a), [x2, y2] = toScreen(e.b);
       const dim = (focus && !(focus.has(e.a) && focus.has(e.b))) || hiddenByFilter(e.a) || hiddenByFilter(e.b);
-      ctx.strokeStyle = `rgba(${MAP.edge},${dim ? 0.03 : 0.1 + 0.4 * Math.max(0, e.sim - 0.4)})`;
+      ctx.strokeStyle = `rgba(${MAP.edge},${dim ? 0.03 : MAP.edgeBase + 0.4 * Math.max(0, e.sim - 0.4)})`;
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
     }
     // 답글 → 원댓글 연결선 (점선)
@@ -105,14 +116,14 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       ctx.globalAlpha = dim ? 0.1 : 1;
       const r = radius(nd) * rk;
       if (nd.reply) { // 답글: 속이 빈 고리
-        ctx.strokeStyle = color(nd); ctx.lineWidth = 1.7;
+        ctx.strokeStyle = color(nd); ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(x, y, Math.max(r - 0.8, 1.6), 0, Math.PI * 2); ctx.stroke();
       } else {
         ctx.fillStyle = color(nd);
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
       }
-      if (nd.flag) { ctx.strokeStyle = MAP.flag; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(x, y, r + 2.6, 0, Math.PI * 2); ctx.stroke(); }
-      if (tags[i] >= 0) { ctx.strokeStyle = TAG_COLORS[tags[i] % TAG_COLORS.length]; ctx.lineWidth = 2; ctx.strokeRect(x - r - 4.5, y - r - 4.5, 2 * r + 9, 2 * r + 9); }
+      if (nd.flag) { ctx.strokeStyle = MAP.flag; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 2.6, 0, Math.PI * 2); ctx.stroke(); }
+      if (tags[i] >= 0 && tagCount) { ctx.strokeStyle = TAG_COLORS[tags[i] % TAG_COLORS.length]; ctx.lineWidth = 2; ctx.strokeRect(x - r - 4.5, y - r - 4.5, 2 * r + 9, 2 * r + 9); }
       if (layout.pin[i] && nd.kind !== "doc") { ctx.fillStyle = MAP.ink; ctx.beginPath(); ctx.arc(x + r * 0.9, y - r * 0.9, 1.6, 0, Math.PI * 2); ctx.fill(); }
       if (selection.has(i) || i === hover) {
         ctx.strokeStyle = MAP.select; ctx.lineWidth = selection.has(i) ? 2 : 1.2;
@@ -213,7 +224,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       draw(); return;
     }
     const h = pick(mx, my);
-    if (h !== hover) { hover = h; canvas.style.cursor = h > 0 ? "pointer" : "grab"; draw(); }
+    if (h !== hover) { hover = h; canvas.style.cursor = h >= 0 && data.nodes[h].kind !== "doc" ? "pointer" : "grab"; draw(); }
     showTooltip(h, mx, my);
   });
 
@@ -243,7 +254,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     if (!data) return;
     const r = rect();
     const i = pick(ev.clientX - r.left, ev.clientY - r.top);
-    if (i > 0) { data.layout.release(i); data.layout.reheat(0.3); animate(); }
+    if (i >= 0 && data.nodes[i].kind !== "doc") { data.layout.release(i); data.layout.reheat(0.3); animate(); }
   });
 
   canvas.addEventListener("mouseleave", () => { hover = -1; tooltip.hidden = true; draw(); });
@@ -264,7 +275,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     if (ev.key === "Escape") { selection.clear(); emitSelection(); onPick?.(-1); draw(); return; }
     if (/^[0-9]$/.test(ev.key) && selection.size) {
       const t = Number(ev.key) - 1;
-      if (t < tagCount) { api.tagSelection(t); ev.preventDefault(); }
+      if (t < tagCount && tagCount) { api.tagSelection(t); ev.preventDefault(); }
     }
   });
 
@@ -292,7 +303,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     setFilter(f) { filter = f; draw(); },
     // 분류(수동 태그)
     setTagCount(n) { tagCount = n; },
-    tagSelection(tag) { for (const i of selection) tags[i] = tag; emitTags(); draw(); },
+    tagSelection(tag) { if (!tagCount) return; for (const i of selection) tags[i] = tag; emitTags(); draw(); },
     removeTag(tag) { // 분류 삭제: 해당 분류는 비우고 뒤 번호를 당긴다
       for (let i = 0; i < tags.length; i++) { if (tags[i] === tag) tags[i] = -1; else if (tags[i] > tag) tags[i]--; }
       emitTags(); draw();
@@ -306,10 +317,12 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     tagsArray: () => tags,
     unpinAll() {
       if (!data) return;
-      for (let i = 1; i < data.nodes.length; i++) data.layout.release(i);
+      for (let i = 0; i < data.nodes.length; i++) if (data.nodes[i].kind !== "doc") data.layout.release(i);
       data.layout.reheat(0.6); animate();
     },
     fit() { view = { k: 1, tx: 0, ty: 0 }; draw(); },
+    setTheme(name) { MAP = THEMES[name] || THEMES.light; PAL = PALETTES[name] || PALETTES.light; draw(); },
+    palette: () => PAL,
     redraw: draw,
   };
   return api;

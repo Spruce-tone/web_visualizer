@@ -15,6 +15,11 @@
     <button id="btn-wide" class="btn quiet" title="새 탭에서 넓은 화면으로 보기">크게 보기</button>
   </header>
 
+  <div id="video-changed" class="notice" hidden>
+    <span id="video-changed-text"></span>
+    <button id="btn-reanalyze" class="btn primary small">이 영상 분석</button>
+  </div>
+
   <section class="controls">
     <div class="actions">
       <button id="btn-all" class="btn primary">댓글 모아서 분석</button>
@@ -30,8 +35,9 @@
           <option value="10000">10,000개</option>
         </select>
       </label>
-      <label class="field"><span>정렬</span>
+      <label class="field"><span>모으는 순서</span>
         <select id="sort">
+          <option value="mix" selected>인기순+최신순 반반</option>
           <option value="top">인기순</option>
           <option value="new">최신순</option>
         </select>
@@ -39,7 +45,14 @@
       <label class="field"><span>의미 모델</span>
         <select id="mode"></select>
       </label>
+      <label class="field"><span>점수 기준</span>
+        <select id="weights">
+          <option value="rule">기본 규칙</option>
+          <option value="calibrated" disabled>공개 데이터 보정 (미설치)</option>
+        </select>
+      </label>
       <label class="check"><input id="replies" type="checkbox" checked /> 답글 포함</label>
+      <label class="check"><input id="mask" type="checkbox" checked /> 작성자 이름 가리기</label>
     </div>
     <p id="model-note" class="note"></p>
     <div id="status" class="status" role="status"></div>
@@ -55,11 +68,25 @@
       <div class="doc">
         <h2 id="doc-title"></h2>
         <p id="doc-meta"></p>
+        <p id="coverage" class="coverage" hidden></p>
       </div>
       <dl class="stats" id="stats"></dl>
 
-      <div class="map">
-        <canvas id="graph" aria-label="댓글 지도"></canvas>
+      <div class="map-head">
+        <div id="map-mode" class="seg small" role="group" aria-label="지도 종류">
+          <button type="button" data-mode="comments" aria-pressed="true">댓글 지도</button>
+          <button type="button" data-mode="authors" aria-pressed="false">작성자 지도</button>
+        </div>
+        <label class="field inline" id="color-by-wrap"><span>색</span>
+          <select id="color-by">
+            <option value="topic">주제</option>
+            <option value="tone">평가 표현 (추정)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="map" id="map" data-theme="light">
+        <canvas id="graph" aria-label="지도"></canvas>
         <div id="tooltip" class="tooltip" hidden></div>
         <div class="map-tools">
           <select id="filter" class="chip-select" aria-label="보이는 댓글 종류">
@@ -71,22 +98,18 @@
           <label class="chip-toggle"><input id="labels-on" type="checkbox" checked /> 키워드</label>
           <button id="btn-fit" class="chip-btn" title="처음 위치와 배율로">맞춤</button>
           <button id="btn-unpin" class="chip-btn" title="손으로 옮긴 점을 모두 풀기">고정 풀기</button>
+          <button id="btn-theme" class="chip-btn" title="지도 배경 밝게/어둡게">어둡게</button>
         </div>
-        <div class="map-legend">
-          <span><i class="dot"></i>댓글</span>
-          <span><i class="dot hollow"></i>답글</span>
-          <span><i class="dot ring"></i>복붙 의심</span>
-          <span><i class="dot doc"></i>본문</span>
-        </div>
+        <div class="map-legend" id="map-legend"></div>
       </div>
 
-      <div class="grain">
+      <div class="grain" id="grain">
         <div class="grain-head">
           <span class="label">주제를 얼마나 잘게 나눌까요</span>
           <span class="value">의미 유사도 <b id="th-sem-val"></b> 이상</span>
         </div>
         <div id="presets" class="seg" role="group" aria-label="추천 기준"></div>
-        <input id="th-sem" type="range" min="0" max="0.99" step="0.01" aria-label="주제 묶음 기준" />
+        <input id="th-sem" type="range" min="-0.5" max="0.99" step="0.01" aria-label="주제 묶음 기준" />
         <div class="grain-count">
           <span>주제 수로 맞추기</span>
           <div class="stepper">
@@ -105,13 +128,15 @@
         <button id="d-parent" class="parent" hidden></button>
         <p id="d-text"></p>
         <div id="d-badges" class="badges"></div>
-        <div class="actions">
+        <ul id="d-list" class="d-list" hidden></ul>
+        <div class="actions" id="d-actions">
           <button id="d-goto" class="btn primary small">페이지에서 이 댓글 보기</button>
           <a id="d-link" class="btn small" target="_blank" rel="noopener">새 탭으로 열기</a>
         </div>
+        <p id="d-status" class="note" role="status"></p>
       </article>
 
-      <div class="cats">
+      <div class="cats" id="cats">
         <div class="cats-head">
           <span class="label">내 분류</span>
           <span id="sel-count" class="value">선택 0개</span>
@@ -121,12 +146,13 @@
       </div>
 
       <details class="help">
-        <summary>지도 조작법</summary>
+        <summary>지도 보는 법과 조작법</summary>
         <ul>
-          <li>점을 누르면 댓글 내용이 아래에 열리고, 거기서 페이지의 실제 위치로 갈 수 있어요.</li>
-          <li>점을 끌면 그 자리에 고정되고 이웃 댓글이 따라옵니다. 더블클릭하면 풀려요.</li>
-          <li>Shift+드래그는 영역 선택, Shift+클릭은 하나씩 추가, Esc는 선택 해제.</li>
-          <li>빈 곳을 끌면 이동, 휠로 확대·축소.</li>
+          <li>점이 클수록 좋아요가 많은 댓글입니다 (이 영상 안에서의 상대 크기). 작성자 지도에서는 댓글을 많이 쓴 사람일수록 큽니다.</li>
+          <li>가까이 모인 점은 내용이 비슷한 댓글입니다. 색은 주제 묶음이에요.</li>
+          <li>점을 누르면 내용이 아래에 열리고, 거기서 페이지의 실제 위치로 갈 수 있어요.</li>
+          <li>점을 끌면 그 자리에 고정되고 이웃이 따라옵니다. 더블클릭하면 풀려요.</li>
+          <li>Shift+드래그는 영역 선택, Shift+클릭은 하나씩 추가, Esc는 선택 해제. 빈 곳을 끌면 이동, 휠로 확대·축소.</li>
         </ul>
       </details>
     </div>
@@ -135,7 +161,10 @@
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="topics" aria-selected="true">주제 <span id="n-topics" class="count"></span></button>
         <button role="tab" data-tab="signals">복붙 의심 <span id="n-signals" class="count"></span></button>
+        <button role="tab" data-tab="patterns">다른 패턴 <span id="n-patterns" class="count"></span></button>
         <button role="tab" data-tab="authors">작성자 <span id="n-authors" class="count"></span></button>
+        <button role="tab" data-tab="tone">평가 표현</button>
+        <button role="tab" data-tab="cross">영상 간 <span id="n-cross" class="count"></span></button>
         <button role="tab" data-tab="time">시간</button>
       </nav>
 
@@ -149,13 +178,37 @@
           <span>문구가 <b id="th-lex-val"></b> 이상 겹치면 같은 묶음</span>
           <input id="th-lex" type="range" min="0.3" max="0.99" step="0.01" value="0.6" aria-label="복붙 판단 기준" />
         </div>
-        <p class="pane-note">문구가 겹치는 댓글 묶음과 그 근거입니다. 판정이 아니라 살펴볼 순서를 정해 주는 참고 점수예요.</p>
+        <p class="pane-note">문구가 겹치는 댓글 묶음입니다. 점수는 문구 일치·작성자 수·반복·시간 같은 <b>행동과 구조만</b>으로 계산하고, 무슨 주장인지는 보지 않습니다. 판정이 아니라 살펴볼 순서예요. <span id="weights-note"></span></p>
         <ol id="signals" class="list"></ol>
       </section>
 
+      <section class="pane" data-pane="patterns" hidden>
+        <p class="pane-note">복붙 말고 살펴볼 만한 다른 모양입니다. 근거가 부족하면 결과 대신 보류 사유를 보여줍니다.</p>
+        <h3 class="sub">같은 주장, 다른 표현</h3>
+        <ol id="p-para" class="list"></ol>
+        <h3 class="sub">한 댓글에 비슷한 답글이 몰림</h3>
+        <ol id="p-pile" class="list"></ol>
+        <h3 class="sub">같은 시간대에 함께 쓴 작성자</h3>
+        <ol id="p-co" class="list"></ol>
+      </section>
+
       <section class="pane" data-pane="authors" hidden>
-        <p class="pane-note">이 영상에 댓글을 3개 이상 쓴 사람입니다.</p>
+        <p class="pane-note">작성자별 행동입니다. 점수는 자기 댓글 되풀이, 다른 사람과 문구 겹침, 다작 여부로만 계산하고, 공감을 많이 받는 작성자는 감점합니다. 댓글이 3개 미만이면 판단을 보류합니다.</p>
         <ol id="authors" class="list"></ol>
+      </section>
+
+      <section class="pane" data-pane="tone" hidden>
+        <p class="pane-note">비난·칭찬 표현이 얼마나 쓰였는지 보여주는 <b>설명용 추정</b>입니다. 의심 점수와 지도 배치에는 전혀 쓰이지 않습니다. 누구에게나 똑같이 쓰는 일반 평가 낱말만 세고, 인물·정당·국가 이름은 보지 않습니다. 비꼼이나 사전에 없는 표현은 놓칩니다.</p>
+        <table id="tone-table" class="table"></table>
+        <h3 class="sub">비난 표현이 든 댓글에서 자주 나온 낱말</h3>
+        <p id="tone-words-c" class="words"></p>
+        <h3 class="sub">칭찬 표현이 든 댓글에서 자주 나온 낱말</h3>
+        <p id="tone-words-p" class="words"></p>
+      </section>
+
+      <section class="pane" data-pane="cross" hidden>
+        <p class="pane-note">이 창을 연 동안 분석한 영상들에 함께 나타난 작성자입니다. 창을 닫으면 사라지고 저장하지 않습니다. 같은 채널 영상이면 단골 시청자일 수 있어요.</p>
+        <ol id="cross" class="list"></ol>
       </section>
 
       <section class="pane" data-pane="time" hidden>

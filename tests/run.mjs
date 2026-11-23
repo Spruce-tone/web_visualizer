@@ -48,7 +48,8 @@ assert.equal(h[0].count, 2);
 const { hashEmbed } = await import("../lib/embed/hash.js");
 const { dot, topKNeighbors, edgesFromNeighbors, clustersFromEdges, pca2 } = await import("../lib/vec.js");
 const { createLayout } = await import("../lib/layout.js");
-const { clusterSignals, topicSummaries } = await import("../lib/analyze.js");
+const { topicSummaries } = await import("../lib/analyze.js");
+const { clusterSignals } = await import("../lib/signals.js");
 const { adaptiveThreshold } = await import("../lib/vec.js");
 
 const texts = [
@@ -88,7 +89,9 @@ const sig = clusterSignals(groups, fakeComments, edges);
 const copy = sig.find((s) => s.size === 3);
 assert.ok(copy.score >= 50, `복붙 묶음은 높은 신호 (score=${copy.score})`);
 const lol = sig.find((s) => s.indices.includes(5));
-assert.equal(lol.score, 0, "짧은 반응은 신호 0");
+assert.equal(lol.state, "natural", "짧은 반응은 자연스러운 반복으로 분류");
+assert.equal(lol.score, null, "자연스러운 반복에는 점수를 내지 않는다");
+assert.equal(copy.score, copy.parts.reduce((s2, p3) => s2 + p3.points, 0), "점수 = 항목 합 (분해 가능)");
 assert.ok(sig.every((s) => s.reasons.every((r) => !r.includes("조작"))), "'조작' 판정 문구 금지");
 
 // 적응형 임계값 / 주제 요약
@@ -146,7 +149,7 @@ assert.ok(wh.data.a.itemSectionRenderer);
 const { sharedPhrases, authorActivity } = await import("../lib/analyze.js");
 const sp = sharedPhrases(["이 정책은 국민을 위한 최고의 선택", "이 정책은 국민을 위한 좋은 선택", "이 정책은 국민을 위한 최선"]);
 assert.equal(sp[0], "이 정책은 국민을 위한");
-assert.ok(copy.reasons.some((r) => r.startsWith("공통 표현")), "복붙 묶음에 공통 표현 근거");
+assert.ok(copy.notes.some((r) => r.startsWith("공통 표현")), "복붙 묶음에 공통 표현 근거");
 const act = authorActivity([
   { author: "a", authorId: "A", text: "1", likes: 1, createdAtApprox: "2026-11-20T00:00:00Z" },
   { author: "a", authorId: "A", text: "2", likes: 2, parentId: "p", createdAtApprox: "2026-11-20T01:00:00Z" },
@@ -200,5 +203,171 @@ assert.deepEqual(pb.order, [1, 2, 0], "짧은 것부터");
 // 손 배치 유지: 기준값만 바꿔 다시 만들 때 좌표·고정 상태를 이어받는다
 const keepL = createLayout(many, [], { keep: { x: lay2.x, y: lay2.y, pin: lay2.pin } });
 assert.equal(keepL.x[7], lay2.x[7]);
+
+// ================= 객관성 기준 테스트 =================
+const { DEFAULT_WEIGHTS, mergeWeights, validateWeights } = await import("../lib/weights.js");
+const { naturalRepetition } = await import("../lib/signals.js");
+const { toneOf, toneSummary } = await import("../lib/tone.js");
+const { authorFeatures, authorSignals, authorMap } = await import("../lib/authors.js");
+const { paraphraseGroups, pileOns, coActiveAuthors, SessionMemory } = await import("../lib/patterns.js");
+const { centerVectors } = await import("../lib/vec.js");
+
+// 묶음 신호를 한 번에 계산하는 도우미
+function signalsFor(list, doc = null, th = 0.6) {
+  const nb = topKNeighbors(hashEmbed(list.map((c) => c.text)), 8);
+  const ed = edgesFromNeighbors(nb, th);
+  const cl = clustersFromEdges(list.length, ed);
+  return { sig: clusterSignals(cl.groups, list, ed, { doc }), cl, ed };
+}
+const mk = (text, author, extra = {}) => ({ id: `${author}-${text.length}-${Math.abs(text.charCodeAt(3) || 0)}`, text, author, authorId: author, likes: 0, createdAtRaw: "3일 전", createdAtApprox: "2026-11-21T00:00:00Z", parentId: null, meta: {}, ...extra });
+
+// [기준 3] 바꿔 넣기: 대상만 바꾼 두 세트의 점수·판정이 같아야 한다
+const template = (who) => [
+  mk(`${who} 정책은 국민을 위한 최선의 선택이라고 생각합니다 모두 함께 지지합시다`, "u1"),
+  mk(`${who} 정책은 국민을 위한 최고의 선택이라고 생각합니다 모두 함께 지지합시다`, "u2"),
+  mk(`${who} 정책은 국민을 위한 최선의 선택이라고 생각합니다 다들 함께 지지합시다`, "u3"),
+  mk("오늘 점심은 김치찌개를 먹었는데 생각보다 맛있어서 놀랐습니다", "u4"),
+  mk("영상 편집이 예전보다 훨씬 깔끔해져서 보기 편해졌네요 자막도 좋아요", "u5"),
+];
+const swapPairs = [["가나당", "다라당"], ["홍길동 대통령", "임꺽정 대통령"], ["한국", "미국"], ["여당", "야당"]];
+for (const [A, B] of swapPairs) {
+  const sa = signalsFor(template(A)).sig[0], sb = signalsFor(template(B)).sig[0];
+  assert.equal(sa.state, sb.state, `바꿔 넣기(${A}↔${B}): 판정 상태가 같아야 함`);
+  assert.ok(Math.abs(sa.score - sb.score) <= 5, `바꿔 넣기(${A}↔${B}): 점수 차 ≤ 5 (${sa.score} vs ${sb.score})`);
+  assert.deepEqual(sa.parts.map((x) => x.points), sb.parts.map((x) => x.points), `바꿔 넣기(${A}↔${B}): 항목별 점수 동일`);
+}
+// 어조 사전은 대상 이름을 모른다 → 대상만 바꾸면 결과가 완전히 같다
+for (const [A, B] of swapPairs) {
+  for (const tpl of [(w) => `${w} 정말 한심하고 뻔뻔하다`, (w) => `${w} 존경합니다 정말 훌륭해요`, (w) => `${w} 오늘 일정이 있다`]) {
+    const ta = toneOf(tpl(A)), tb = toneOf(tpl(B));
+    assert.deepEqual([ta.label, ta.condemn, ta.praise], [tb.label, tb.condemn, tb.praise], `어조 바꿔 넣기(${A}↔${B})`);
+  }
+}
+assert.equal(toneOf("정말 한심하고 뻔뻔하다").label, "condemn");
+assert.equal(toneOf("존경합니다 훌륭해요").label, "praise");
+assert.equal(toneOf("한심하지만 그래도 응원합니다").label, "mixed", "섞이면 불확실로");
+assert.equal(toneOf("오늘 날씨가 덥다").label, "none");
+assert.equal(toneOf("한심하다").spans[0].start, 0, "근거 구절 위치");
+
+// [기준 1] 의심 점수 항목에 어조·대상이 없다: 문구만 다른(어조가 다른) 두 묶음이 같은 구조면 같은 점수
+const condemnSet = [mk("이 사람들 정말 한심하고 뻔뻔하다고 생각합니다 모두 반성해야 합니다", "a1"), mk("이 사람들 정말 한심하고 뻔뻔하다고 생각합니다 모두 반성해야 해요", "a2"), mk("이 사람들 진짜 한심하고 뻔뻔하다고 생각합니다 모두 반성해야 합니다", "a3")];
+const praiseSet = [mk("이 사람들 정말 훌륭하고 대단하다고 생각합니다 모두 본받아야 합니다", "a1"), mk("이 사람들 정말 훌륭하고 대단하다고 생각합니다 모두 본받아야 해요", "a2"), mk("이 사람들 진짜 훌륭하고 대단하다고 생각합니다 모두 본받아야 합니다", "a3")];
+const sc = signalsFor(condemnSet).sig[0], sp2 = signalsFor(praiseSet).sig[0];
+assert.ok(Math.abs(sc.score - sp2.score) <= 5, `비난/칭찬 문구라도 구조가 같으면 점수가 같다 (${sc.score} vs ${sp2.score})`);
+assert.ok(JSON.stringify(DEFAULT_WEIGHTS).match(/tone|어조|condemn|praise/i) === null, "가중치에 어조 항목이 없다");
+
+// [기준 5] 자연스러운 반복은 점수를 내지 않는다
+const greet = signalsFor([mk("영상 잘 보고 갑니다 감사합니다", "g1"), mk("영상 잘 보고 갑니다 감사합니다!", "g2"), mk("오늘도 영상 잘 보고 갑니다 감사합니다", "g3"), mk("전혀 다른 긴 이야기를 여기에 적어 봅니다 주제도 다르고요", "g4")]).sig[0];
+assert.equal(greet.state, "natural", "흔한 인사·응원");
+const quote = signalsFor([mk("내일은 해가 뜬다 우리 모두 힘내자", "q1"), mk("내일은 해가 뜬다 우리 모두 힘내자!!", "q2"), mk("내일은 해가 뜬다 우리 모두 힘내자 ㅠㅠ", "q3")], { title: "신곡 발표", text: "가사: 내일은 해가 뜬다 우리 모두 힘내자" }).sig[0];
+assert.equal(quote.state, "natural", "영상 설명(가사) 인용");
+const stamp = signalsFor([mk("3:12 여기 진짜 웃김", "s1"), mk("3:12 여기 진짜 웃김ㅋㅋ", "s2"), mk("3:12 여기 진짜 웃김 ㅋ", "s3")]).sig[0];
+assert.equal(stamp.state, "natural", "타임스탬프 댓글");
+const evt = signalsFor([mk("참여합니다 좋은 기회 주셔서 기쁩니다", "e1"), mk("참여합니다 좋은 기회 주셔서 기뻐요", "e2"), mk("참여합니다 좋은 기회 주셔서 기쁩니다!", "e3")], { title: "선물 나눔", text: "댓글로 참여 남겨주시면 추첨합니다" }).sig[0];
+assert.equal(evt.state, "natural", "참여 요청 영상");
+
+// [기준 6] 근거가 부족하면 판단 보류
+const two = signalsFor([mk("이 정책은 국민을 위한 최선의 선택이라고 생각합니다 지지합시다", "h1"), mk("이 정책은 국민을 위한 최선의 선택이라고 생각합니다 지지합시다!", "h2"), mk("완전히 다른 이야기입니다 날씨가 참 좋네요 산책 가고 싶다", "h3")]).sig[0];
+assert.equal(two.state, "hold");
+assert.equal(two.score, null);
+// 시각이 '며칠 전' 수준이면 시간 몰림 항목을 평가하지 않는다
+assert.ok(!signalsFor(template("가나당")).sig[0].parts.some((x) => x.label.includes("시간대")), "거친 시각 → 시간 항목 없음");
+assert.ok(signalsFor(template("가나당")).sig[0].notes.some((x) => x.includes("평가하지 않음")));
+// 분·시간 단위 시각이 있고 영상 전체 대비 좁은 구간에 몰리면 항목이 붙는다
+const base24 = Date.parse("2026-11-23T00:00:00Z");
+const burst = [
+  ...template("가나당").slice(0, 3).map((c, i) => ({ ...c, createdAtRaw: "5시간 전", createdAtApprox: new Date(base24 + 19 * 3600e3 + i).toISOString() })),
+  ...Array.from({ length: 40 }, (_, i) => mk(`서로 다른 평범한 댓글 번호 ${i} 입니다 내용도 제각각 ${i * 7}`, `o${i}`, { createdAtRaw: `${i % 20 + 1}시간 전`, createdAtApprox: new Date(base24 + (i % 20) * 3600e3 - 3600e3 * 5).toISOString() })),
+];
+assert.ok(signalsFor(burst).sig[0].parts.some((x) => x.label.includes("시간대")), "세밀한 시각 + 좁은 구간 → 시간 항목");
+
+// [기준 8] 같은 입력이면 같은 결과
+assert.equal(JSON.stringify(signalsFor(template("가나당")).sig), JSON.stringify(signalsFor(template("가나당")).sig));
+
+// 가중치 프로필
+assert.ok(validateWeights(DEFAULT_WEIGHTS));
+assert.equal(validateWeights({ cluster: { nearIdentical: 500 } }), false, "범위를 벗어난 보정값 거부");
+assert.equal(mergeWeights(DEFAULT_WEIGHTS, { cluster: { nearIdentical: 40 }, source: "보정" }).cluster.nearIdentical, 40);
+assert.equal(DEFAULT_WEIGHTS.cluster.nearIdentical, 35, "기본값은 변하지 않는다");
+
+// ---- 작성자 ----
+const ac = [
+  mk("이 내용은 꼭 널리 알려야 한다고 생각합니다 공유 부탁드립니다", "rep"), mk("이 내용은 꼭 널리 알려야 한다고 생각합니다 공유 부탁드립니다", "rep"),
+  mk("이 내용은 꼭 널리 알려야 한다고 생각합니다 공유 부탁드립니다", "rep"), mk("이 내용은 꼭 널리 알려야 한다고 생각합니다 공유 부탁드려요", "rep2"),
+  mk("저는 조금 다르게 봅니다 근거가 부족해 보여요 자료를 더 봐야", "n1", { likes: 50 }), mk("편집이 좋아졌네요 다음 편도 기대합니다 수고 많으셨어요", "n1", { likes: 80 }), mk("배경음악 제목이 궁금합니다 아시는 분 계실까요 알려주세요", "n1", { likes: 20 }),
+  mk("한 번만 씁니다 그냥 지나가다 남기는 평범한 감상입니다", "once"),
+];
+const anb = topKNeighbors(hashEmbed(ac.map((c) => c.text)), 8), aed = edgesFromNeighbors(anb, 0.6), acl = clustersFromEdges(ac.length, aed);
+const af = authorFeatures(ac, acl.ids, acl.groups);
+const rep = af.find((f) => f.key === "rep");
+assert.ok(Math.abs(rep.selfDup - (1 - 1 / 3)) < 1e-9, "자기 복제 비율 = 1 − 고유/전체");
+assert.equal(rep.crossMatch, 1, "다른 작성자(rep2)와 문구가 겹침");
+const as = authorSignals(af);
+assert.equal(as[0].key, "rep");
+assert.ok(as[0].score >= 50 && as[0].score === Math.max(0, Math.min(100, as[0].parts.reduce((s2, p3) => s2 + p3.points, 0))));
+assert.equal(as.find((f) => f.key === "once").state, "hold", "댓글 1개 작성자는 판단 보류");
+assert.equal(as.find((f) => f.key === "n1").score, 0, "평범한 작성자는 0점");
+assert.ok(authorMap(af).list.length >= 2);
+
+// ---- 추가 패턴 ----
+// 같은 주장 다른 표현: 의미 이웃은 가깝고 문구 유사도는 낮은 쌍만 묶인다
+const pc = Array.from({ length: 30 }, (_, i) => mk(`평범한 댓글 ${i} 번째 내용은 서로 다릅니다 ${i * 13}`, `p${i}`));
+const fakeSem = pc.map((_, i) => [{ j: (i + 1) % 30, sim: i < 4 ? 0.95 : 0.3 + (i % 5) * 0.01 }]);
+fakeSem[0] = [{ j: 1, sim: 0.95 }, { j: 2, sim: 0.95 }]; fakeSem[1] = [{ j: 0, sim: 0.95 }, { j: 2, sim: 0.95 }]; fakeSem[2] = [{ j: 0, sim: 0.95 }, { j: 1, sim: 0.95 }];
+const pg = paraphraseGroups(fakeSem, () => 0.1, pc);
+assert.ok(pg.groups.length >= 1 && pg.groups[0].authors >= 3);
+assert.equal(paraphraseGroups(fakeSem, () => 0.9, pc).groups.length, 0, "문구까지 같으면 '다른 표현'이 아니다 (복붙 쪽에서 다룸)");
+assert.ok(paraphraseGroups(fakeSem.slice(0, 5), () => 0.1, pc.slice(0, 5)).note, "댓글이 적으면 보류");
+
+// 몰려가기
+const parent = mk("원댓글입니다 이 주제에 대한 제 의견을 길게 적어 봅니다", "root", { id: "P" });
+const reps = Array.from({ length: 6 }, (_, i) => mk(`답글 ${i}`, `r${i}`, { id: `P.${i}`, parentId: "P" }));
+const po = pileOns([parent, ...reps], (i) => (i >= 1 && i <= 4 ? 7 : -1));
+assert.equal(po.length, 1);
+assert.equal(po[0].similar, 4);
+assert.equal(pileOns([parent, ...reps], () => -1).length, 0);
+
+// 같이 움직이는 작성자: 거친 시각이면 보류
+assert.ok(coActiveAuthors(pc).note);
+const fineC = [];
+for (const u of ["x", "y"]) for (const h of [1, 2, 3]) fineC.push(mk(`세밀한 시각 댓글 ${u} ${h}`, u, { createdAtRaw: `${h}시간 전`, createdAtApprox: new Date(base24 - h * 3600e3 + (u === "x" ? 60e3 : 120e3)).toISOString() }));
+assert.equal(coActiveAuthors(fineC).groups[0].authors, 2);
+
+// 영상 간 교차 (메모리)
+const mem = new SessionMemory();
+mem.add({ title: "A", author: "ch1", meta: { videoId: "v1" } }, [mk("a", "same"), mk("b", "only1")]);
+mem.add({ title: "B", author: "ch2", meta: { videoId: "v2" } }, [mk("c", "same"), mk("d", "only2")]);
+const cv = mem.crossVideo();
+assert.equal(cv.authors.length, 1);
+assert.equal(cv.authors[0].sameChannel, false);
+
+// 평균 빼기: 한쪽으로 쏠린 벡터의 유사도 차이가 벌어진다
+const skew = [[1, 0.1, 0], [1, 0, 0.1], [1, -0.1, 0]].map((v) => { const n = Math.hypot(...v); return Float32Array.from(v.map((x) => x / n)); });
+const cen = centerVectors(skew);
+assert.ok(dot(skew[0], skew[2]) > 0.9 && dot(cen[0], cen[2]) < 0, "쏠림 제거 후 반대 방향이 드러난다");
+
+// 영상 메타: 새 HTML에서 읽는다
+const wm = WV.parseWatchMeta(`<meta name="title" content="새 &amp; 제목"><link itemprop="name" content="채널A">"shortDescription":"설명 \\"x\\"\\n둘째"`);
+assert.equal(wm.title, "새 & 제목");
+assert.equal(wm.channel, "채널A");
+assert.ok(wm.description.includes("둘째"));
+
+// ---- 공개 데이터 보정 (합성 데이터로 계산만 검증) ----
+const { calibrateAuthorWeights, aggregateUsers } = await import("../lib/calibrate.js");
+const synth = [];
+for (let u = 0; u < 120; u++) {
+  const troll = u < 40;
+  for (let k = 0; k < 6; k++) {
+    synth.push({ user: `u${u}`, label: troll ? 1 : 0, likes: troll ? 0 : (u % 4 === 0 ? 30 : 2),
+      text: troll && k < 4 ? "이 문장은 여러 계정이 그대로 되풀이하는 긴 문장입니다" : `사용자 ${u} 가 쓴 서로 다른 평범한 댓글 ${k} 번 내용 ${u * 31 + k}` });
+  }
+}
+const agg = aggregateUsers(synth);
+assert.ok(agg.find((x) => x.user === "u0").selfDup >= 0.5 && agg.find((x) => x.user === "u100").selfDup === 0);
+const cal = calibrateAuthorWeights(synth, { date: "test" });
+assert.ok(validateWeights(mergeWeights(DEFAULT_WEIGHTS, cal.override)), "보정 결과는 유효 범위 안");
+assert.ok(cal.report.auc > 0.9, `합성 데이터에서 분리 가능 (AUC ${cal.report.auc})`);
+assert.ok(!JSON.stringify(cal.override).match(/tone|condemn|praise/i), "보정 프로필에도 어조 항목이 없다");
+assert.throws(() => calibrateAuthorWeights(synth.slice(0, 30)), "데이터가 부족하면 거부");
 
 console.log("all tests passed");

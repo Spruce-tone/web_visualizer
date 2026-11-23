@@ -38,6 +38,7 @@ jobs:
         run: |
           mkdir -p dist/web-visualizer
           cp -r manifest.json background.js content lib sidepanel vendor dist/web-visualizer/
+          if [ -f calibration/weights.json ]; then mkdir -p dist/web-visualizer/calibration && cp calibration/weights.json dist/web-visualizer/calibration/; fi
           cd dist && zip -qr web-visualizer.zip web-visualizer
           ls -lh web-visualizer.zip
 

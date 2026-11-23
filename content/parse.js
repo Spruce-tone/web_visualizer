@@ -130,5 +130,16 @@ WV.parseWatchHtml = function (html) {
   return { cfg, data };
 };
 
+/** watch 페이지 HTML에서 제목·채널·설명 (화면의 DOM은 영상을 옮긴 직후 이전 영상 값이 남아 있을 수 있어 HTML을 우선한다) */
+WV.parseWatchMeta = function (html) {
+  const unesc = (s) => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const meta = (name) => { const m = html.match(new RegExp(`<meta name="${name}" content="([^"]*)"`)); return m ? unesc(m[1]) : null; };
+  let description = null;
+  const d = html.match(/"shortDescription":"((?:[^"\\]|\\.)*)"/);
+  if (d) { try { description = JSON.parse(`"${d[1]}"`); } catch { description = null; } }
+  const ch = html.match(/<link itemprop="name" content="([^"]*)"/);
+  return { title: meta("title"), channel: ch ? unesc(ch[1]) : null, description: description ?? meta("description") };
+};
+
 WV.text = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
 WV.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
