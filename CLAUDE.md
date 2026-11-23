@@ -17,10 +17,14 @@
 - M2.5 ✅ v0.3: 전체 댓글 자동 수집(InnerTube), Qwen3-Embedding 기본, 옵시디언식 수동 배치·분류(고정/다중선택/분류 1~4), 근거에 공통 표현, 작성자 활동
 - v0.4 ✅ CPU용 경량 모델(Bekko)+wasm 멀티스레드(COOP/COEP), UI 재디자인(Pretendard, 어두운 지도, 탭, 크게 보기 탭), 주제 키워드, 추천 기준값·주제 수 맞추기, 댓글 상세 카드·실제 위치로 이동, 분류 1~9개 추가/삭제, 댓글/답글 구분(고리·점선·필터)
 - v0.5 ✅ 객관성 기준(docs/objectivity.md) 적용: 점수는 행동·구조만, 자연 반복 거르기, 판단 보류, 점수 분해, 바꿔 넣기 테스트 / 작성자 지도·작성자 신호 / 다른 패턴(같은 주장 다른 표현, 몰림, 함께 쓴 작성자, 영상 간 교차) / 평가 표현(설명용) / 점수 기준 프로필(기본·공개 데이터 보정 선택) / 새로고침 없는 댓글 이동(자동 펼침) / 밝은 지도 / 영상 전환 안내
+- v0.6~0.7 ✅ 고르게 무작위 추출 / 댓글 열기: 페이지 쪽 다리(page-bridge.js)가 댓글 영역만 다시 불러옴(실제 페이지에서 검증: 1~2초, 영상 계속 재생) / 연속 지도(lib/umap.js) + 커뮤니티 주제(lib/community.js), 가르는 키워드, 같은 키워드 묶음 합치기 / 지도 그리기 최적화, 키워드 끌기 / 보기 설정 메뉴
 - 다음: fixtures 검증 세트 수집 후 `npm run evaluate`, 실제 공개 데이터로 보정 실행, Web Worker 분리
 - M3 사이트 어댑터 추가 (네이버 뉴스, 커뮤니티 1곳, 일반 기사)
 
 ## 참고
+- 댓글 열기 순서: 화면에 있음 → `wv-show-comment`(댓글 영역만 다시 불러오기, 기본) → `wv-navigate`(YouTube 내부 이동, 광고 위험) → 패널의 MAIN world 실행 → 스크롤 탐색. 주소를 바꿔 popstate를 쏘는 방법은 전체 새로고침이 되므로 쓰지 않는다.
+- 개발·점검: 영상 주소 끝에 `#wv-dev-open` 을 붙이면 '크게 보기'가 같은 탭 묶음에 열린다 (자동화 도구로 화면 점검용).
+- 주제는 k-평균(lib/cluster.js)에서 커뮤니티로 바꿨다. k-평균은 이웃 찾기의 구역 나누기에만 쓴다.
 - 객관성 기준: `docs/objectivity.md` / 신호 계산·참고 연구: `docs/signals.md`
 - YouTube 전체 수집: `content/youtube.js` `collectAll` (watch HTML의 ytcfg/ytInitialData → youtubei/v1/next continuation). 응답 파서는 `content/parse.js` `parseInnertubeComments` (테스트 있음)
 

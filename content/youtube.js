@@ -1,8 +1,9 @@
 // YouTube 어댑터: DOM → 공통 스키마(Doc, Comment[])
 // 선택자는 YouTube 개편 시 깨질 수 있으므로 이 파일에만 모아둔다.
 (function () {
-  if (globalThis.__WV_YT_LOADED__) return; // 재주입 시 리스너 중복 방지
-  globalThis.__WV_YT_LOADED__ = true;
+  // 다시 주입될 수 있다(확장을 새로 고친 뒤 영상 탭을 새로고침하지 않은 경우 등).
+  // 예전에는 '이미 있음' 표시만 보고 그냥 끝내서, 죽은 옛 리스너만 남아 응답이 없었다 → 옛 리스너를 떼고 새로 단다.
+  try { if (globalThis.__WV_YT_LISTENER__) chrome.runtime.onMessage.removeListener(globalThis.__WV_YT_LISTENER__); } catch { /* 옛 문맥이 이미 무효 */ }
   const SEL = {
     title: "ytd-watch-metadata h1, h1.ytd-watch-metadata, #title h1",
     channel: "ytd-watch-metadata #channel-name a, #owner #channel-name a",
@@ -240,13 +241,13 @@
     while (Date.now() < deadline && !findCancelled) {
       const v = document.querySelector("video");
       // 내부 이동을 하면 영상이 처음부터 다시 시작한다 → 보던 위치로 되돌린다
-      if (!restored && v && v.readyState >= 1 && t > 3 && v.currentTime < t - 2) {
+      const ad = !!document.querySelector(".html5-video-player.ad-showing"); // 광고가 나오는 동안에는 위치를 되돌릴 수 없다
+      if (!restored && !ad && v && v.readyState >= 1 && t > 3 && v.currentTime < t - 2) {
         try { v.currentTime = t; if (paused) v.pause(); restored = true; } catch { /* 무시 */ }
       }
       const section = document.querySelector("ytd-comments");
       const el = findCommentEl(id);
       if (el) {
-        if (!restored && v && t > 3 && v.currentTime < t - 2) { try { v.currentTime = t; if (paused) v.pause(); } catch { /* 무시 */ } }
         highlight(el);
         return { ok: true };
       }
@@ -320,17 +321,62 @@
   window.addEventListener("hashchange", devOpen);
   devOpen();
 
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  /** 페이지 쪽 다리(page-bridge.js)에 부탁하고 답을 기다린다. 다리가 없으면 "timeout". */
+  function askBridge(name, payload, timeoutMs) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; document.removeEventListener(`${name}-ack`, onAck); resolve(v); };
+      const onAck = (ev) => finish(String(ev.detail));
+      document.addEventListener(`${name}-ack`, onAck);
+      document.dispatchEvent(new CustomEvent(name, { detail: JSON.stringify(payload) }));
+      setTimeout(() => finish("timeout"), timeoutMs);
+    });
+  }
+
+  /** 댓글이 화면(DOM)에 나타날 때까지 기다렸다가 강조 */
+  async function waitAndHighlight(id, timeoutMs) {
+    const end = Date.now() + timeoutMs;
+    while (Date.now() < end && !findCancelled) {
+      const el = findCommentEl(id);
+      if (el) { highlight(el); return true; }
+      await WV.sleep(200);
+    }
+    return false;
+  }
+
+  /**
+   * 댓글 열기. 빠르고 영상에 영향이 없는 방법부터 차례로 시도한다.
+   *  1) 이미 화면에 있음 → 바로 이동
+   *  2) 댓글 영역만 다시 불러와 '하이라이트 댓글'로 띄움 (영상 계속 재생, 1~2초)
+   *  3) YouTube 내부 이동 (영상이 다시 불러와지고 광고가 나올 수 있음)
+   *  4) 안 되면 패널에 알려 다른 길(스크롤 탐색)을 쓰게 한다
+   */
+  async function openComment(id) {
+    findCancelled = false;
+    let el = findCommentEl(id);
+    if (el) { highlight(el); return { ok: true, via: "화면에 있던 댓글" }; }
+    const section = document.querySelector("ytd-comments");
+    if (!section) return { ok: false, reason: "이 페이지에서 댓글 영역을 찾지 못했어요." };
+    section.scrollIntoView({ block: "start" }); // 댓글 영역이 화면에 와야 YouTube가 댓글과 정렬 버튼을 불러온다
+    say("댓글 영역에서 그 댓글을 불러오는 중");
+    const shown = await askBridge("wv-show-comment", { videoId: videoId(), id }, 14000);
+    if (shown === "ok" && (await waitAndHighlight(id, 10000))) return { ok: true, via: "댓글 영역만 다시 불러옴" };
+    if (findCancelled) return { ok: false, reason: "찾기를 멈췄어요." };
+    const v = document.querySelector("video");
+    const t = v ? v.currentTime : 0, paused = v ? v.paused : true;
+    const nav = await askBridge("wv-navigate", { videoId: videoId(), id }, 600);
+    if (nav === "ok") { const r = await waitForLinked({ id, t, paused }); return { ...r, via: "YouTube 내부 이동", detail: shown }; }
+    return { ok: false, need: "navigate", t, paused, detail: `${shown}/${nav}` };
+  }
+
+  const listener = (msg, _sender, sendResponse) => {
     if (!/youtube\.com\/watch/.test(location.href)) {
       sendResponse({ ok: false, error: "YouTube 영상 페이지(/watch)에서 실행하세요." });
       return;
     }
     if (msg.type === "WV_FOCUS") {
-      // 1단계(즉시): 이미 화면에 있으면 바로 이동. 없으면 패널이 YouTube의 내부 이동으로 '하이라이트 댓글'을 불러온다.
-      const el = findCommentEl(msg.id);
-      if (el) { highlight(el); sendResponse({ ok: true }); return; }
-      const v = document.querySelector("video");
-      sendResponse({ ok: false, need: "navigate", videoId: videoId(), t: v ? v.currentTime : 0, paused: v ? v.paused : true });
+      openComment(msg.id).then(sendResponse, (e) => sendResponse({ ok: false, reason: String(e.message || e) }));
+      return true;
     } else if (msg.type === "WV_FOCUS_WAIT") {
       waitForLinked(msg).then(sendResponse, (e) => sendResponse({ ok: false, reason: String(e.message || e) }));
       return true;
@@ -357,5 +403,7 @@
       cancelled = true;
       sendResponse({ ok: true });
     }
-  });
+  };
+  globalThis.__WV_YT_LISTENER__ = listener;
+  chrome.runtime.onMessage.addListener(listener);
 })();

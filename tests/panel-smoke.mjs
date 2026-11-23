@@ -77,28 +77,33 @@ assert.ok(V.aSignals.find((a) => a.key === "@repeater").score >= 30, "되풀이 
 assert.ok(V.piles.length >= 1, "비슷한 답글이 몰린 스레드를 찾음");
 assert.equal(api.state().shown, "comments");
 
-// 주제: k-평균으로 나뉘고, 짧은 반응은 따로 모인다
+// 주제: 이웃 그래프의 커뮤니티로 나뉘고, 짧은 반응은 따로 모인다. 지도 좌표는 댓글마다 하나씩.
 assert.ok(V.K >= 2 && V.topics.length >= V.K, "주제가 여러 개로 나뉨");
 assert.ok(V.topics.every((t) => t.short || t.keywords.length), "주제마다 키워드");
-assert.equal(V.anchors.length, V.topics.length, "주제마다 섬(닻)");
+assert.equal(S.x.length, comments.length + 1);
+assert.ok(S.x.every(Number.isFinite) && S.y.every(Number.isFinite), "지도 좌표가 모두 유효");
+const labelSets = V.topics.filter((t) => !t.short && t.keywords.length >= 2).map((t) => t.keywords.slice(0, 2).sort().join("|"));
+assert.equal(new Set(labelSets).size, labelSets.length, "키워드가 같은 주제는 하나로 합쳐진다");
 
-// 2) 문구 기준 변경 → 다시 계산, 손 배치와 옮긴 섬 위치 유지
+// 2) 문구 기준·세밀도를 바꿔도 점의 위치(손으로 옮긴 것 포함)는 그대로
 const before = V.commentLayout;
 before.fix(5, 11, 22);
-before.moveGroup(0, 300, 0);
-const movedAnchorX = before.anchors[0].x;
-const pinnedX = before.x[5]; // 고정한 점이 0번 주제에 속하면 함께 옮겨졌을 수 있다
 byId("th-lex").value = 0.7;
 api.rebuild();
 V = api.state().V;
-assert.equal(V.commentLayout.x[5], pinnedX, "문구 기준을 바꿔도 손으로 옮긴 위치 유지");
-assert.equal(V.commentLayout.anchors[0].x, movedAnchorX, "키워드를 끌어 옮긴 주제 위치 유지");
-// 주제 수 변경 → 다시 배치하되 손으로 고정한 점은 그 자리에
-byId("k-range").value = Math.max(2, V.K - 1);
+assert.equal(V.commentLayout.x[5], 11, "문구 기준을 바꿔도 손으로 옮긴 위치 유지");
+const x9 = V.commentLayout.x[9], kBefore = V.K;
+byId("res-range").value = 100;
 api.rebuild();
 V = api.state().V;
-assert.equal(V.commentLayout.x[5], pinnedX, "주제 수를 바꿔도 손으로 고정한 점은 유지");
-assert.ok(V.commentLayout.pin[5]);
+assert.equal(V.commentLayout.x[5], 11, "세밀도를 바꿔도 손으로 옮긴 위치 유지");
+assert.equal(V.commentLayout.x[9], x9, "세밀도를 바꿔도 다른 점의 위치는 그대로 (색만 다시 나눔)");
+assert.ok(V.K >= kBefore, "더 잘게 나누면 주제 수가 줄지 않는다");
+// 키워드를 끌면 그 주제의 점이 함께 움직인다
+const g0 = V.topic.ids[0];
+const mx = V.commentLayout.x[1];
+V.commentLayout.moveGroup(g0, 40, 0);
+assert.equal(V.commentLayout.x[1], mx + 40);
 
 // 3) 상세 카드, 답글, 색 기준 전환
 const replyIdx = comments.findIndex((c) => c.parentId);
@@ -123,7 +128,7 @@ api.rebuild();
 const snap = JSON.parse(JSON.stringify(api.snapshot()));
 assert.equal(snap.S.comments.length, comments.length);
 assert.equal(snap.pos.x.length, comments.length + 1);
-assert.ok(snap.vecs.b64.length > 0 && snap.pos.anchors.length === api.state().V.anchors.length, "벡터와 섬 위치도 함께 넘어감");
+assert.equal(snap.S.x.length, comments.length + 1, "지도 좌표도 함께 넘어감");
 
 // 6) 댓글 위치로 이동: 답글이면 원댓글 id도 함께 보낸다
 api.showDetail(replyIdx);

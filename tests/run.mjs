@@ -419,4 +419,51 @@ sample.onResponseReceivedEndpoints[0].reloadContinuationItemsCommand.continuatio
 const pr2 = WV.parseInnertubeComments(sample, "youtube:x", { now });
 assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])), '[["Ugx1",1]]');
 
+// ---- 연속 지도(UMAP)와 커뮤니티(Louvain), 가르는 키워드 ----
+const { fuzzyGraph, umapLayout, toPixels } = await import("../lib/umap.js");
+const { louvain } = await import("../lib/community.js");
+const { createStaticLayout } = await import("../lib/layout.js");
+const cvec = centerVectors(hashEmbed(three));
+const fgr = fuzzyGraph(topKNeighbors(cvec, 10));
+assert.ok(fgr.every((e) => e.a < e.b && e.w > 0 && e.w <= 1.0001), "퍼지 그래프 간선 강도 0~1");
+const um = umapLayout(three.length, fgr, pca2(cvec));
+toPixels(um.x, um.y);
+assert.ok([...um.x, ...um.y].every(Number.isFinite));
+const um2 = umapLayout(three.length, fgr, pca2(cvec));
+toPixels(um2.x, um2.y);
+assert.equal(um.x[17], um2.x[17], "같은 입력이면 같은 지도");
+// 같은 주제끼리 가까이: 주제 안 평균 거리 < 주제 사이 평균 거리
+let within = 0, wn = 0, between = 0, bn = 0;
+for (let i = 0; i < three.length; i++) for (let j = i + 1; j < three.length; j++) {
+  const dd = Math.hypot(um.x[i] - um.x[j], um.y[i] - um.y[j]);
+  if (i % 3 === j % 3) { within += dd; wn++; } else { between += dd; bn++; }
+}
+assert.ok(within / wn < (between / bn) * 0.6, `같은 주제는 지도에서 가까이 모인다 (${(within / wn).toFixed(0)} vs ${(between / bn).toFixed(0)})`);
+let closest = Infinity;
+for (let i = 0; i < three.length; i++) for (let j = i + 1; j < three.length; j++) closest = Math.min(closest, Math.hypot(um.x[i] - um.x[j], um.y[i] - um.y[j]));
+assert.ok(closest >= 6, "점이 서로 겹치지 않는다");
+
+const lvn = louvain(three.length, fgr, { resolution: 1 });
+assert.equal(lvn.sizes.length, 3, "세 주제를 찾는다");
+assert.ok([0, 3, 6, 9].every((i) => lvn.ids[i] === lvn.ids[0]) && lvn.ids[0] !== lvn.ids[1]);
+assert.equal(JSON.stringify(Array.from(louvain(three.length, fgr, { resolution: 1 }).ids)), JSON.stringify(Array.from(lvn.ids)), "결정적");
+assert.ok(louvain(three.length, fgr, { resolution: 4 }).sizes.length >= lvn.sizes.length, "세밀도를 올리면 묶음이 줄지 않는다");
+// 두 무리를 다리 하나로 이은 그래프 → 두 묶음
+const twoG = [];
+for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) { twoG.push({ a: i, b: j, w: 1 }); twoG.push({ a: i + 6, b: j + 6, w: 1 }); }
+twoG.push({ a: 0, b: 6, w: 0.2 });
+assert.deepEqual(louvain(12, twoG).sizes, [6, 6]);
+
+// 모든 묶음에 흔한 낱말은 키워드에서 빠진다
+const kwD = topicKeywords([[0, 1, 2], [3, 4, 5]], ["민주당 탄핵 추진 반대", "민주당 탄핵 무리", "민주당 탄핵 절차", "민주당 경제 정책 실패", "민주당 경제 물가", "민주당 경제 대책"]);
+assert.ok(!kwD[0].includes("민주당") && !kwD[1].includes("민주당"), `흔한 낱말 제외 (${kwD})`);
+assert.equal(kwD[0][0], "탄핵");
+assert.equal(kwD[1][0], "경제");
+
+const sl = createStaticLayout([0, 10, 20], [0, 0, 0], [-1, 0, 0]);
+sl.moveGroup(0, 5, 5);
+assert.deepEqual([sl.x[0], sl.x[1], sl.x[2], sl.pin[1]], [0, 15, 25, 1]);
+sl.release(1);
+assert.equal(sl.x[1], 10, "더블클릭(해제)하면 원래 자리로");
+
 console.log("all tests passed");

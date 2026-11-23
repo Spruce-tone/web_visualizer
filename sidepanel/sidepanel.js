@@ -5,9 +5,11 @@
 // - 의미 임베딩(자동 선택): 지도 배치, 주제 묶음, '같은 주장 다른 표현'
 // - 평가 표현(어조): 설명용 탭과 색칠에만. 점수·배치에는 쓰지 않는다
 import { hashEmbed } from "../lib/embed/hash.js";
-import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast, packVectors, unpackVectors } from "../lib/vec.js";
-import { kmeans, suggestK, isShortReaction, representatives } from "../lib/cluster.js";
-import { createLayout, placeAnchors } from "../lib/layout.js";
+import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast } from "../lib/vec.js";
+import { kmeans, isShortReaction } from "../lib/cluster.js";
+import { fuzzyGraph, umapLayout, toPixels } from "../lib/umap.js";
+import { louvain } from "../lib/community.js";
+import { createLayout, createStaticLayout } from "../lib/layout.js";
 import { timeHistogram } from "../lib/analyze.js";
 import { clusterSignals } from "../lib/signals.js";
 import { DEFAULT_WEIGHTS, loadCalibrated } from "../lib/weights.js";
@@ -171,11 +173,28 @@ async function run(type, extra) {
 
     setStatus("지도 그리는 중", "busy");
     await yieldUI();
-    const all = semAll || hashEmbed(subTexts);
-    const vecs = all.slice(1); // 짧은 반응을 뺀 댓글의 벡터 (idx 순서)
-    const subNbrs = await neighborsFast(vecs, 8, { partition: kmeans });
+    // 3) 연속 지도: 이웃 그래프 → UMAP 배치 (본문도 점 하나로 함께 놓는다). 주제 묶기도 같은 그래프를 쓴다.
+    const all = semAll || hashEmbed(subTexts); // [본문, 짧은 반응을 뺀 댓글…]
+    const nb = await neighborsFast(all, 12, { partition: kmeans });
+    const fg = fuzzyGraph(nb);
+    const { x: ux, y: uy } = umapLayout(all.length, fg, pca2(all));
+    toPixels(ux, uy);
+    const nodeOf = (local) => (local === 0 ? 0 : idx[local - 1] + 1); // 지도 점 번호: 0 = 본문, i+1 = 댓글 i
+    const X = new Array(n + 1).fill(0), Y = new Array(n + 1).fill(0);
+    let maxY = -Infinity, sumX = 0;
+    for (let l = 0; l < all.length; l++) { X[nodeOf(l)] = ux[l]; Y[nodeOf(l)] = uy[l]; maxY = Math.max(maxY, uy[l]); sumX += ux[l] / all.length; }
+    // 짧은 반응은 뜻으로 놓을 수 없어 지도 아래에 따로 모아 둔다 (좋아요 많은 순으로 가운데부터)
+    const shortIdx = [];
+    short.forEach((sh, i) => { if (sh) shortIdx.push(i); });
+    shortIdx.sort((p, q) => (comments[q].likes || 0) - (comments[p].likes || 0) || p - q);
+    const sr = 8 * Math.sqrt(shortIdx.length) + 10;
+    shortIdx.forEach((i, t) => {
+      const rad = sr * Math.sqrt((t + 0.5) / shortIdx.length), ang = t * 2.399963;
+      X[i + 1] = sumX + rad * Math.cos(ang); Y[i + 1] = (isFinite(maxY) ? maxY : 0) + sr + 60 + rad * Math.sin(ang);
+    });
+    const graphEdges = fg.map((e) => ({ a: nodeOf(e.a), b: nodeOf(e.b), w: e.w }));
     const semNbrs = comments.map(() => []);
-    subNbrs.forEach((list, a) => (semNbrs[idx[a]] = list.map(({ j, sim }) => ({ j: idx[j], sim }))));
+    for (let l = 1; l < all.length; l++) semNbrs[idx[l - 1]] = nb[l].filter((q) => q.j !== 0).map(({ j, sim }) => ({ j: idx[j - 1], sim }));
     const para = semAll
       ? paraphraseGroups(semNbrs, (i, j) => dot(lexVecs[i], lexVecs[j]), comments)
       : { groups: [], note: "의미 모델로 분석했을 때만 볼 수 있어요." };
@@ -184,13 +203,13 @@ async function run(type, extra) {
     const t3 = performance.now();
 
     S = {
-      tabId: tab.id, doc, comments, lexNbrs, semNbrs, vecs, idx, short, semantic: !!semAll, modelName, where,
+      tabId: tab.id, doc, comments, lexNbrs, semNbrs, x: X, y: Y, graphEdges, idx, short, semantic: !!semAll, modelName, where,
       para, co, tone: { tones: tone.tones, rows: tone.rows, topN: tone.topN },
     };
     memory.add(doc, comments);
     picked = -1; savedTags = null; V = null; mapMode = "comments";
     showResult();
-    setK(suggestK(idx.length));
+    setRes(50);
     renderPresets();
     rebuild({ fresh: true });
     await checkVideo();
@@ -214,12 +233,12 @@ function setSlider(id, v) {
   $(id + "-val").textContent = Number(v).toFixed(2);
 }
 
-function setK(k) {
-  const max = Number($("k-range").max) || 40;
-  const v = Math.max(1, Math.min(max, Math.round(k)));
-  $("k-range").value = v;
-  $("k-val").textContent = v;
-  return v;
+/** 세밀도 슬라이더(0~100) → Louvain resolution(0.25~4). 50이 보통(1.0) */
+const resolutionOf = (v) => 0.25 * Math.pow(16, v / 100);
+function setRes(v) {
+  const x = Math.max(0, Math.min(100, Math.round(v)));
+  $("res-range").value = x;
+  return x;
 }
 
 /** 문구 쪽 계산 (복붙 의심, 작성자, 몰림). 문구 기준·점수 기준이 바뀔 때만 다시 한다. */
@@ -242,43 +261,58 @@ function computeLex() {
   return { lexKey: key, signals, flagged, aSignals, aMap, piles };
 }
 
-/** 주제 쪽 계산: k-평균으로 k개 주제 + '짧은 반응' 묶음. 주제 수가 바뀔 때만 다시 한다. */
+/**
+ * 주제 쪽 계산: 이웃 그래프의 커뮤니티(Louvain). 세밀도가 바뀔 때만 다시 한다. 점의 위치는 바뀌지 않는다.
+ * 키워드가 같은 묶음은 하나로 합친다 (같은 이야기인데 둘로 갈린 경우).
+ */
 function computeTopics() {
-  const { comments, vecs, idx, short } = S;
-  const k = Math.max(1, Math.min(Number($("k-range").value) || 1, Math.max(1, idx.length)));
-  if (V?.topicKey === k) return V.topicPart;
-  const km = idx.length ? kmeans(vecs, k) : { ids: new Int32Array(0), centroids: [], sizes: [] };
-  const K = km.centroids.length;
-  const shortCount = short.filter(Boolean).length;
-  const ids = new Int32Array(comments.length).fill(shortCount ? K : -1); // 짧은 반응은 K번 묶음
-  idx.forEach((ci, a) => (ids[ci] = km.ids[a]));
-  // 중심에 가까운 정도(대표 댓글, 섬 안 배치 순서에 사용)
-  const central = new Float32Array(comments.length);
-  idx.forEach((ci, a) => (central[ci] = dot(vecs[a], km.centroids[km.ids[a]])));
-  const reps = representatives(vecs, km.ids, km.centroids).map((a) => (a >= 0 ? idx[a] : -1));
-  const groups = Array.from({ length: K }, () => []);
-  idx.forEach((ci, a) => groups[km.ids[a]].push(ci));
-  const kws = topicKeywords(groups, comments.map((c) => c.text), { k: 4 });
-  const summarize = (indices, cluster, keywords, sample, isShort = false) => {
+  const { comments, short, graphEdges } = S;
+  const n = comments.length;
+  const v = Number($("res-range").value) || 0;
+  if (V?.topicKey === v) return V.topicPart;
+  const lv = louvain(n + 1, graphEdges, { resolution: resolutionOf(v), minSize: 3 });
+  let ids = Int32Array.from({ length: n }, (_, i) => (short[i] ? -1 : lv.ids[i + 1]));
+  const texts = comments.map((c) => c.text);
+  const groupsOf = (arr) => { const g = []; arr.forEach((c, i) => { if (c >= 0) (g[c] ||= []).push(i); }); return g.map((x) => x || []); };
+  let groups = groupsOf(ids), kws = topicKeywords(groups, texts, { k: 4 });
+  for (let round = 0; round < 4; round++) {
+    const seen = new Map();
+    let merged = false;
+    groups.forEach((g, c) => {
+      if (!g.length || kws[c].length < 2) return;
+      const key = kws[c].slice(0, 2).sort().join("|");
+      if (seen.has(key)) { const to = seen.get(key); for (const i of g) ids[i] = to; merged = true; }
+      else seen.set(key, c);
+    });
+    if (!merged) break;
+    groups = groupsOf(ids); kws = topicKeywords(groups, texts, { k: 4 });
+  }
+  // 큰 묶음부터 번호를 다시 매긴다
+  const order = groups.map((g, c) => [c, g.length]).filter(([, s2]) => s2 > 0).sort((p, q) => q[1] - p[1] || p[0] - q[0]);
+  const rank = new Map(order.map(([c], r) => [c, r]));
+  ids = ids.map((c) => (c >= 0 ? rank.get(c) : -1));
+  groups = groupsOf(ids);
+  kws = topicKeywords(groups, texts, { k: 4 });
+  const K = groups.length;
+  // 대표 댓글: 같은 주제의 이웃과 가장 강하게 이어진 댓글
+  const strength = new Float32Array(n);
+  for (const { a, b, w } of graphEdges) { if (a && b && ids[a - 1] >= 0 && ids[a - 1] === ids[b - 1]) { strength[a - 1] += w; strength[b - 1] += w; } }
+  const summarize = (indices, cluster, keywords, isShort = false) => {
     const items = indices.map((i) => comments[i]);
+    const rep = indices.reduce((best, i) => (strength[i] > strength[best] ? i : best), indices[0]);
     return {
-      cluster, keywords, sample, indices, short: isShort, size: indices.length,
+      cluster, keywords, indices, short: isShort, size: indices.length,
+      sample: isShort ? "" : comments[rep].text,
       authors: new Set(items.map(keyOf)).size,
       likes: items.reduce((s2, c) => s2 + (c.likes || 0), 0),
       replies: items.filter((c) => c.parentId).length,
     };
   };
-  const topics = groups.map((g, c) => summarize(g, c, kws[c], reps[c] >= 0 ? comments[reps[c]].text : ""));
-  if (shortCount) {
-    const sIdx = [];
-    short.forEach((sh, i) => sh && sIdx.push(i));
-    topics.push(summarize(sIdx, K, ["짧은 반응"], "", true));
-  }
-  // 닻(섬) 위치: 주제 중심 벡터의 2D 투영에서 출발해 서로 겹치지 않게 떨어뜨린다
-  const coords = K >= 3 ? pca2(km.centroids) : km.centroids.map((_, i) => [Math.cos(i * 2.4), Math.sin(i * 2.4)]);
-  if (shortCount) { const far = Math.max(1, ...coords.flat().map(Math.abs)); coords.push([0, far * 1.4]); }
-  const anchors = placeAnchors(coords, topics.map((t) => t.size));
-  return { topicKey: k, topic: { ids }, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), anchors, central, K };
+  const topics = groups.map((g, c) => summarize(g, c, kws[c]));
+  const sIdx = [];
+  short.forEach((sh, i) => { if (sh) { sIdx.push(i); ids[i] = K; } });
+  if (sIdx.length) topics.push(summarize(sIdx, K, ["짧은 반응"], true));
+  return { topicKey: v, topic: { ids }, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), K };
 }
 
 /** 기준이 바뀌면 필요한 쪽만 다시 계산. 손으로 옮긴 점과 내 분류는 유지한다. */
@@ -289,14 +323,12 @@ function rebuild({ fresh = false, restore = null } = {}) {
   if (fresh) V = null;
   const lexPart = computeLex();
   const topicPart = computeTopics();
-  const topicsChanged = !prev || prev.topicKey !== topicPart.topicKey;
   const indexById = new Map(comments.map((c, i) => [c.id, i]));
   const byAuthor = new Map();
   comments.forEach((c, i) => { const k2 = keyOf(c); if (!byAuthor.has(k2)) byAuthor.set(k2, []); byAuthor.get(k2).push(i); });
   V = {
     ...lexPart, lexPart, ...topicPart, topicPart, indexById, byAuthor,
-    commentLayout: prev && !topicsChanged ? prev.commentLayout : null,
-    pinsFrom: prev && topicsChanged ? prev.commentLayout : null, // 주제가 바뀌어 다시 배치해도 손으로 고정한 점은 그 자리에
+    commentLayout: prev?.commentLayout || null, // 점의 위치는 세밀도·문구 기준을 바꿔도 그대로 (손으로 옮긴 것 포함)
     authorLayout: prev?.authorLayout || null,
     restorePos: restore?.pos || null,
   };
@@ -322,6 +354,7 @@ function drawMap({ fresh = false } = {}) {
   for (const id of ["grain", "cats", "color-by-wrap", "filter"]) $(id).hidden = authors;
   $("links-on").parentElement.hidden = authors;
   $("labels-on").parentElement.hidden = authors;
+  $("edges-on").parentElement.hidden = authors;
   document.querySelectorAll("#map-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mapMode)));
   $("detail").hidden = true;
   graph.setFilter(authors ? "all" : $("filter").value);
@@ -345,26 +378,13 @@ function drawMap({ fresh = false } = {}) {
     const layout = createLayout(init, edges, { keep });
     V.authorLayout = layout;
     graph.setTagCount(0);
-    graph.set({ layout, edges, nodes, focus: null, labels: [] }, { keepView: false });
+    graph.set({ layout, edges, nodes, focus: null, labels: [], alwaysEdges: true, noGlow: true }, { keepView: false });
     shown = "authors";
   } else {
-    const { comments, doc, semNbrs } = S;
+    const { comments, doc } = S;
     const ids = V.topic.ids;
-    // 선: 같은 주제 안에서 가장 가까운 이웃 2개까지만 (지도가 덜 어지럽고 빨리 그려진다)
-    const gEdges = [];
-    const seen = new Set();
-    semNbrs.forEach((list, i) => {
-      let used = 0;
-      for (const { j, sim } of list) {
-        if (used >= 2) break;
-        if (ids[j] !== ids[i]) continue;
-        used++;
-        const key = i < j ? i * 1e6 + j : j * 1e6 + i;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        gEdges.push({ a: i + 1, b: j + 1, sim });
-      }
-    });
+    // 이웃선은 기본으로 숨긴다 ("보기"에서 켤 수 있음). 강하게 이어진 것만.
+    const gEdges = S.graphEdges.filter((e) => e.w >= 0.5).map((e) => ({ a: e.a, b: e.b, sim: e.w }));
     const maxLikes = Math.max(1, ...comments.map((c) => c.likes || 0));
     const byTone = $("color-by").value === "tone";
     const nodes = [
@@ -382,21 +402,22 @@ function drawMap({ fresh = false } = {}) {
     ];
     const replyEdges = [];
     comments.forEach((c, i) => { const p = c.parentId ? V.indexById.get(c.parentId) : undefined; if (p !== undefined) replyEdges.push({ a: p + 1, b: i + 1 }); });
-    const keep = V.commentLayout || V.restorePos || null;
-    // 이어받는 배치가 있으면 닻도 그 위치 그대로 (키워드를 끌어 옮긴 주제가 제자리로 돌아가지 않게)
-    const anchors = keep?.anchors?.length === V.anchors.length ? keep.anchors : V.anchors;
+    let layout = V.commentLayout;
+    const hadLayout = !!layout;
+    if (!layout) {
+      layout = createStaticLayout(S.x, S.y, null);
+      if (V.restorePos) layout.restore(V.restorePos);
+    }
     V.restorePos = null;
-    const order = [0, ...comments.map((c, i) => (S.short[i] ? Math.log1p(c.likes || 0) / 100 : V.central[i]))];
-    const layout = createLayout(nodes.map(() => [0, 0]), gEdges, { pinned: [0], keep, keepPins: V.pinsFrom, groups: [-1, ...ids], anchors, order });
-    V.pinsFrom = null;
+    layout.groups = [-1, ...ids];
     V.commentLayout = layout;
-    const labels = V.topics.map((t) => ({
+    const labels = [...V.topics.filter((t) => !t.short && t.size >= 3).slice(0, 15), ...V.topics.filter((t) => t.short)].map((t) => ({
       cluster: t.cluster,
       text: t.short ? `짧은 반응 ${num(t.size)}` : t.keywords.slice(0, 2).join(" ") || `주제 ${t.cluster + 1}`,
       color: t.short ? "#8D98AB" : null,
     }));
     graph.setTagCount(tagDefs.length);
-    graph.set({ layout, edges: gEdges, nodes, focus: null, labels, replyEdges }, { keepView: !fresh && shown === "comments" && !!keep, tags: savedTags });
+    graph.set({ layout, edges: gEdges, nodes, focus: null, labels, replyEdges }, { keepView: !fresh && shown === "comments" && hadLayout, tags: savedTags });
     shown = "comments";
   }
   focusKey = null;
@@ -456,30 +477,26 @@ function renderSummary() {
   $("weights-note").textContent = `점수 기준: ${weights.source} (${weights.version}).`;
 }
 
-// ---------- 주제 수 ----------
+// ---------- 주제 세밀도 ----------
 function renderPresets() {
-  const base = suggestK(S.idx.length);
-  const max = Math.max(2, Math.min(40, Math.floor(S.idx.length / 3) || 2));
-  $("k-range").max = max;
-  const presets = [["넓게", base * 0.5], ["보통", base], ["세밀하게", base * 1.6], ["아주 세밀하게", base * 2.4]].map(([label, v]) => ({ label, value: Math.max(2, Math.min(max, Math.round(v))) }));
-  $("presets").replaceChildren(...presets.map((p) => {
+  const presets = [["크게", 25], ["보통", 50], ["잘게", 75], ["아주 잘게", 100]];
+  $("presets").replaceChildren(...presets.map(([label, v]) => {
     const b = el("button");
     b.type = "button";
-    b.dataset.value = p.value;
-    b.append(el("span", "", p.label), el("small", "", `${p.value}개`));
-    b.onclick = () => { setK(p.value); rebuild(); };
+    b.dataset.value = v;
+    b.append(el("span", "", label));
+    b.onclick = () => { setRes(v); rebuild(); };
     return b;
   }));
-  setK(Math.min(Number($("k-range").value) || base, max));
 }
 function syncGrain() {
-  const v = String(Number($("k-range").value));
+  const v = String(Number($("res-range").value));
   $("presets").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === v)));
-  $("k-val").textContent = V.K;
+  $("k-val").textContent = `주제 ${V.K}개`;
 }
 function stepTopics(delta) {
   if (!S) return;
-  setK((Number($("k-range").value) || 1) + delta);
+  setRes((Number($("res-range").value) || 0) + delta * 5);
   rebuild();
 }
 
@@ -736,20 +753,22 @@ async function gotoComment() {
     finding = true;
     $("d-goto").textContent = "찾기 중지";
     $("d-status").textContent = "페이지에서 댓글을 여는 중";
-    // 1) 이미 화면에 있으면 바로 이동
+    // content script가 차례로 시도한다: 화면에 있음 → 댓글 영역만 다시 불러오기 → YouTube 내부 이동
     let r = await send("WV_FOCUS", { id: c.id, parentId: c.parentId });
     if (!r?.ok && r?.need === "navigate") {
-      // 2) YouTube 내부 이동으로 그 댓글을 댓글 맨 위에 불러온다 (2~3초, 새로고침 없음)
+      // 페이지 쪽 다리가 없을 때(아주 오래 열어 둔 탭 등): 패널에서 직접 내부 이동을 시도하고, 그래도 안 되면 스크롤 탐색
       let fired = false;
       try {
         const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", func: ytNavigateToComment, args: [S.doc.meta.videoId, c.id] });
         fired = !!res?.result;
       } catch (e) { console.warn("[WV] yt-navigate failed", e); }
       r = fired
-        ? await send("WV_FOCUS_WAIT", { id: c.id, t: r.t, paused: r.paused })
-        : await send("WV_FOCUS_SCAN", { id: c.id, parentId: c.parentId }); // 3) 예비: 댓글 영역을 내려가며 찾기 (느림)
+        ? { ...(await send("WV_FOCUS_WAIT", { id: c.id, t: r.t, paused: r.paused })), via: "YouTube 내부 이동" }
+        : { ...(await send("WV_FOCUS_SCAN", { id: c.id, parentId: c.parentId })), via: "스크롤 탐색" };
     }
-    $("d-status").textContent = r?.ok ? "페이지에서 그 댓글을 열었어요. 댓글 맨 위에 강조돼 있습니다." : `${r?.reason || "찾지 못했어요."} "새 탭으로 열기"로 바로 볼 수 있어요.`;
+    $("d-status").textContent = r?.ok
+      ? `페이지에서 그 댓글을 열었어요. 댓글 맨 위에 강조돼 있습니다. (${r.via})`
+      : `${r?.reason || "찾지 못했어요."} "새 탭으로 열기"로 바로 볼 수 있어요.${r?.detail ? ` [${r.detail}]` : ""}`;
   } catch (e) {
     $("d-status").textContent = e.message;
   } finally {
@@ -798,24 +817,24 @@ function renderTags(counts = []) {
 function snapshot() {
   if (shown === "comments") savedTags = Array.from(graph.tagsArray());
   const L = V?.commentLayout;
-  const { names, vecs, ...plain } = S; // Map·벡터는 그대로 못 넘긴다 → 벡터는 문자열로 묶어 보낸다
+  const { names, ...plain } = S; // Map은 넘기지 않는다
   return {
-    S: plain, vecs: packVectors(vecs), tagDefs,
-    k: $("k-range").value, thLex: $("th-lex").value,
+    S: plain, tagDefs,
+    res: $("res-range").value, thLex: $("th-lex").value,
     tags: savedTags,
-    pos: L ? { x: Array.from(L.x), y: Array.from(L.y), pin: Array.from(L.pin), anchors: L.anchors } : null,
+    pos: L ? { x: Array.from(L.x), y: Array.from(L.y), pin: Array.from(L.pin) } : null,
   };
 }
 async function restoreFromPanel() {
   try {
     const snap = await chrome.runtime.sendMessage({ type: "WV_STATE_REQUEST", tabId: fixedTab });
     if (!snap?.S) return;
-    S = { ...snap.S, vecs: unpackVectors(snap.vecs) };
+    S = snap.S;
     tagDefs = snap.tagDefs;
     picked = -1; V = null; shown = null; mapMode = "comments";
     memory.add(S.doc, S.comments);
     showResult();
-    setK(snap.k);
+    setRes(Number(snap.res));
     renderPresets();
     setSlider("th-lex", snap.thLex);
     rebuild({ fresh: true, restore: { tags: snap.tags, pos: snap.pos } });
@@ -858,8 +877,8 @@ $("btn-wide").onclick = async () => {
 };
 $("th-lex").oninput = () => { $("th-lex-val").textContent = Number($("th-lex").value).toFixed(2); };
 $("th-lex").onchange = () => rebuild();
-$("k-range").oninput = () => { $("k-val").textContent = $("k-range").value; };
-$("k-range").onchange = () => rebuild();
+$("res-range").onchange = () => rebuild();
+$("edges-on").onchange = () => graph.toggleEdges($("edges-on").checked);
 setSlider("th-lex", 0.6);
 $("k-minus").onclick = () => stepTopics(-1);
 $("k-plus").onclick = () => stepTopics(+1);

@@ -30,7 +30,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
   let selection = new Set();
   let tags = new Int8Array(0); // -1 = 없음
   let tagCount = 4;
-  let showLabels = true, showReplyLinks = true, filter = "all"; // all | top(댓글만) | reply(답글만)
+  let showLabels = true, showReplyLinks = true, showEdges = false, filter = "all"; // all | top(댓글만) | reply(답글만)
   // 그릴 때마다 다시 만들지 않는 캐시
   let sx = new Float32Array(0), sy = new Float32Array(0), rad = new Float32Array(0);
   let colorOf = [], colorGroups = new Map(), marked = [], labelRects = [];
@@ -76,12 +76,13 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
   }
   const toWorld = (px, py) => [(px - W / 2 - view.tx) / view.k, (py - H / 2 - view.ty) / view.k];
 
+  /** 주제 이름표: 닻이 있으면 섬 위에, 없으면(연속 지도) 그 주제 점들의 가운데에. 서로 겹치지 않게 위아래로 비켜 놓는다. */
   function drawIslandsAndLabels(labelsOnly) {
     const an = data.layout.anchors;
-    labelRects = [];
-    if (!data.labels?.length) return;
+    if (!data.labels?.length) { labelRects = []; return; }
     const k = view.k, ox = W / 2 + view.tx, oy = H / 2 + view.ty;
-    if (!labelsOnly && an) {
+    if (!labelsOnly) {
+      if (!an) return;
       for (const { cluster, color } of data.labels) {
         const a = an[cluster];
         if (!a) continue;
@@ -92,7 +93,20 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       ctx.globalAlpha = 1;
       return;
     }
+    labelRects = [];
     if (!showLabels) return;
+    // 주제별 가운데 (닻이 없을 때)
+    let mid = null;
+    if (!an) {
+      mid = new Map();
+      for (let i = 0; i < data.nodes.length; i++) {
+        const c = data.nodes[i].cluster;
+        if (c < 0 || data.nodes[i].kind === "doc") continue;
+        let m = mid.get(c);
+        if (!m) mid.set(c, (m = [0, 0, 0]));
+        m[0] += sx[i]; m[1] += sy[i]; m[2]++;
+      }
+    }
     ctx.font = "650 12.5px Pretendard, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -100,15 +114,20 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       if (!text) return;
       let x, y;
       if (an && an[cluster]) { x = an[cluster].x * k + ox; y = (an[cluster].y - an[cluster].r - 6) * k + oy - 12; }
+      else if (mid?.get(cluster)) { const m = mid.get(cluster); x = m[0] / m[2]; y = m[1] / m[2]; }
       else return;
       if (x < -60 || y < -20 || x > W + 60 || y > H + 20) return;
       const w = ctx.measureText(text).width + 18;
+      // 겹치면 위·아래로 번갈아 비켜 준다
+      const hit = (yy) => labelRects.some((r) => x - w / 2 < r.x1 + 4 && x + w / 2 > r.x0 - 4 && yy - 12 < r.y1 + 3 && yy + 12 > r.y0 - 3);
+      for (let t = 0; t < 8 && hit(y); t++) y += (t % 2 ? -1 : 1) * 27 * (t + 1);
+      const c = color || PAL[cluster % PAL.length];
       ctx.fillStyle = MAP.halo;
       ctx.beginPath(); ctx.roundRect(x - w / 2, y - 12, w, 24, 12); ctx.fill();
-      ctx.strokeStyle = color || PAL[cluster % PAL.length];
-      ctx.lineWidth = li === hoverLabel || (drag?.type === "label" && drag.li === li) ? 2 : 1;
+      ctx.strokeStyle = c;
+      ctx.lineWidth = li === hoverLabel || (drag?.type === "label" && drag.li === li) ? 2.4 : 1.2;
       ctx.stroke();
-      ctx.fillStyle = color || PAL[cluster % PAL.length];
+      ctx.fillStyle = c;
       ctx.fillText(text, x, y + 0.5);
       labelRects.push({ li, cluster, x0: x - w / 2, y0: y - 12, x1: x + w / 2, y1: y + 12 });
     });
@@ -124,9 +143,29 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     project();
     drawIslandsAndLabels(false);
 
+    // 주제 번짐: 같은 주제의 점 주위를 옅게 칠해 무리가 한눈에 보이게 한다 (연속 지도에서 섬 대신)
+    const rk = Math.max(0.75, Math.min(2.2, Math.sqrt(view.k)));
+    if (!data.layout.anchors && !data.noGlow) {
+      const glow = 9 * Math.max(0.6, Math.min(2.5, view.k));
+      ctx.globalAlpha = MAP.island + 0.03;
+      for (const [c, list] of colorGroups) {
+        if (c === MAP.lone || c === MAP.doc) continue;
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        for (const i of list) {
+          if (nodes[i].cluster < 0 || nodes[i].tint || hiddenByFilter(nodes[i]) || (focus && !focus.has(i))) continue;
+          const r = rad[i] * rk + glow;
+          ctx.moveTo(sx[i] + r, sy[i]); ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // 선: 진하기 3단계 × (보통/흐림) 으로 묶어 한 번씩만 그린다. 움직이는 중이고 선이 아주 많으면 생략.
     const busy = raf && edges.length > 6000;
     if (!busy) {
+      if (showEdges || data.layout.anchors || data.alwaysEdges) {
       const paths = [[], [], [], []]; // 0~2 = 유사도 단계, 3 = 흐림
       for (const e of edges) {
         const dim = (focus && !(focus.has(e.a) && focus.has(e.b))) || hiddenByFilter(nodes[e.a]) || hiddenByFilter(nodes[e.b]);
@@ -141,6 +180,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
         for (const e of list) { ctx.moveTo(sx[e.a], sy[e.a]); ctx.lineTo(sx[e.b], sy[e.b]); }
         ctx.stroke();
       });
+      }
       if (showReplyLinks && data.replyEdges?.length && filter !== "top") {
         ctx.setLineDash([3, 3]);
         ctx.strokeStyle = `rgba(${MAP.reply},${focus ? 0.12 : 0.38})`;
@@ -152,7 +192,6 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     }
 
     // 점: 색별로 묶어 채운 점 / 고리(답글) / 흐린 점을 각각 한 번에
-    const rk = Math.sqrt(view.k);
     const onScreen = (i) => sx[i] > -20 && sy[i] > -20 && sx[i] < W + 20 && sy[i] < H + 20;
     for (const [c, list] of colorGroups) {
       for (let pass = 0; pass < 4; pass++) { // 0 채움 1 고리 2 흐린 채움 3 흐린 고리
@@ -359,7 +398,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     if (!data) return;
     const [mx, my] = pos(ev);
     const i = pick(mx, my);
-    if (i >= 0 && data.nodes[i].kind !== "doc") { data.layout.release(i); data.layout.reheat(0.2); animate(); }
+    if (i >= 0 && data.nodes[i].kind !== "doc") { data.layout.release(i); data.layout.reheat(0.2); animate(); draw(); }
   });
 
   canvas.addEventListener("mouseleave", () => { hover = -1; hoverLabel = -1; tooltip.hidden = true; if (!raf) draw(); });
@@ -421,6 +460,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     setLabels(labels) { if (data) { data.labels = labels; draw(); } },
     toggleLabels(on) { showLabels = on; draw(); },
     toggleReplyLinks(on) { showReplyLinks = on; draw(); },
+    toggleEdges(on) { showEdges = on; draw(); },
     setFilter(f) { filter = f; draw(); },
     // 분류(수동 태그)
     setTagCount(n) { tagCount = n; },
@@ -439,7 +479,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     unpinAll() {
       if (!data) return;
       for (let i = 0; i < data.nodes.length; i++) if (data.nodes[i].kind !== "doc") data.layout.release(i);
-      data.layout.reheat(0.5); animate();
+      data.layout.reheat(0.5); animate(); draw();
     },
     fit() { autoFit = true; fitView(); draw(); },
     setTheme(name) { themeName = THEMES[name] ? name : "light"; MAP = THEMES[themeName]; PAL = PALETTES[themeName]; if (data) prepare(); draw(); },
