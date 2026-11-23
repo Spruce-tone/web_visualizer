@@ -78,38 +78,28 @@
           <button type="button" data-mode="comments" aria-pressed="true">댓글 지도</button>
           <button type="button" data-mode="authors" aria-pressed="false">작성자 지도</button>
         </div>
+        <label class="field inline" id="color-by-wrap"><span>색</span>
+          <select id="color-by">
+            <option value="topic">주제</option>
+            <option value="tone">평가 표현 (추정)</option>
+          </select>
+        </label>
       </div>
 
       <div class="map" id="map" data-theme="light">
         <canvas id="graph" aria-label="지도"></canvas>
         <div id="tooltip" class="tooltip" hidden></div>
         <div class="map-tools">
-          <button id="btn-fit" class="chip-btn" title="지도 전체가 보이게">전체 보기</button>
-          <details class="view-menu">
-            <summary class="chip-btn">보기 설정</summary>
-            <div class="view-pop">
-              <label class="row"><span>보여줄 것</span>
-                <select id="filter" aria-label="보이는 댓글 종류">
-                  <option value="all">댓글+답글</option>
-                  <option value="top">댓글만</option>
-                  <option value="reply">답글만</option>
-                </select>
-              </label>
-              <label class="row" id="color-by-wrap"><span>색</span>
-                <select id="color-by">
-                  <option value="topic">주제</option>
-                  <option value="tone">평가 표현 (추정)</option>
-                </select>
-              </label>
-              <label class="check"><input id="labels-on" type="checkbox" checked /> 주제 키워드</label>
-              <label class="check"><input id="links-on" type="checkbox" checked /> 답글과 원댓글 잇는 점선</label>
-              <label class="check"><input id="edges-on" type="checkbox" /> 비슷한 댓글 잇는 선</label>
-              <div class="row">
-                <button id="btn-unpin" class="chip-btn" title="손으로 옮긴 점을 모두 원래 자리로">위치 되돌리기</button>
-                <button id="btn-theme" class="chip-btn" title="지도 배경 밝게/어둡게">어둡게</button>
-              </div>
-            </div>
-          </details>
+          <select id="filter" class="chip-select" aria-label="보이는 댓글 종류">
+            <option value="all">댓글+답글</option>
+            <option value="top">댓글만</option>
+            <option value="reply">답글만</option>
+          </select>
+          <label class="chip-toggle" title="답글과 원댓글을 점선으로 잇기"><input id="links-on" type="checkbox" checked /> 답글선</label>
+          <label class="chip-toggle"><input id="labels-on" type="checkbox" checked /> 키워드</label>
+          <button id="btn-fit" class="chip-btn" title="지도 전체가 보이게">맞춤</button>
+          <button id="btn-unpin" class="chip-btn" title="손으로 옮긴 점을 모두 풀기">고정 풀기</button>
+          <button id="btn-theme" class="chip-btn" title="지도 배경 밝게/어둡게">어둡게</button>
         </div>
         <div class="map-legend" id="map-legend"></div>
       </div>
@@ -125,7 +115,7 @@
         </div>
         <div id="presets" class="seg" role="group" aria-label="추천 세밀도"></div>
         <input id="res-range" type="range" min="0" max="100" step="5" value="50" aria-label="주제 세밀도" />
-        <p class="note">점의 위치는 그대로 두고 색(주제)만 다시 나눕니다. 키워드를 끌면 그 주제의 댓글이 함께 움직이고, 키워드를 누르면 그 주제가 모두 선택돼요.</p>
+        <p class="note">지도의 키워드를 끌면 그 주제의 댓글이 함께 따라옵니다. 키워드를 누르면 그 주제의 댓글이 모두 선택돼요.</p>
       </div>
 
       <article id="detail" class="detail" hidden>
@@ -157,11 +147,11 @@
         <summary>지도 보는 법과 조작법</summary>
         <ul>
           <li>점이 클수록 좋아요가 많은 댓글입니다 (이 영상 안에서의 상대 크기). 작성자 지도에서는 댓글을 많이 쓴 사람일수록 큽니다.</li>
-          <li>뜻이 비슷한 댓글일수록 가까이 놓입니다. 무리가 뚜렷이 갈리기도 하고 자연스럽게 이어지기도 해요. 색과 옅은 번짐이 주제입니다.</li>
+          <li>선으로 이어진 점은 뜻이 비슷한 댓글입니다. 같은 색이 같은 주제예요.</li>
           <li>키워드를 끌면 그 주제의 댓글이 함께 움직이고, 키워드를 누르면 그 주제의 댓글이 모두 선택돼요.</li>
           <li>지도 아래 "짧은 반응" 무리에는 ㅋㅋ, lol, 이모지처럼 뜻으로 묶기 어려운 댓글을 따로 모았습니다.</li>
           <li>점을 누르면 내용이 아래에 열리고, 거기서 페이지의 실제 위치로 갈 수 있어요.</li>
-          <li>점을 끌어 원하는 곳에 놓을 수 있어요. 더블클릭하면 원래 자리로 돌아갑니다.</li>
+          <li>점을 끌면 그 자리에 고정되고 이어진 댓글이 따라옵니다. 더블클릭하면 풀려요.</li>
           <li>Shift+드래그는 영역 선택, Shift+클릭은 하나씩 추가, Esc는 선택 해제. 빈 곳을 끌면 이동, 휠로 확대·축소.</li>
         </ul>
       </details>

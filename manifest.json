@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Web Visualizer",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "웹 문서와 댓글을 임베딩해 지도처럼 시각화합니다. 데이터는 저장하지 않습니다.",
   "permissions": [
     "sidePanel",

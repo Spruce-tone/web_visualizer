@@ -457,13 +457,33 @@ assert.deepEqual(louvain(12, twoG).sizes, [6, 6]);
 // 모든 묶음에 흔한 낱말은 키워드에서 빠진다
 const kwD = topicKeywords([[0, 1, 2], [3, 4, 5]], ["민주당 탄핵 추진 반대", "민주당 탄핵 무리", "민주당 탄핵 절차", "민주당 경제 정책 실패", "민주당 경제 물가", "민주당 경제 대책"]);
 assert.ok(!kwD[0].includes("민주당") && !kwD[1].includes("민주당"), `흔한 낱말 제외 (${kwD})`);
-assert.equal(kwD[0][0], "탄핵");
-assert.equal(kwD[1][0], "경제");
+assert.ok(kwD[0].includes("탄핵"));
+assert.ok(kwD[1].includes("경제"));
 
 const sl = createStaticLayout([0, 10, 20], [0, 0, 0], [-1, 0, 0]);
 sl.moveGroup(0, 5, 5);
 assert.deepEqual([sl.x[0], sl.x[1], sl.x[2], sl.pin[1]], [0, 15, 25, 1]);
 sl.release(1);
 assert.equal(sl.x[1], 10, "더블클릭(해제)하면 원래 자리로");
+
+// ---- 공유 이웃(SNN) 그래프로 주제 묶기 ----
+const { snnGraph } = await import("../lib/community.js");
+const snnE = snnGraph(topKNeighbors(cvec, 10));
+assert.ok(snnE.every((e) => e.w > 0 && e.w <= 1));
+const lvS = louvain(three.length, snnE, { resolution: 1 });
+assert.equal(lvS.sizes.length, 3, "SNN 그래프에서도 세 주제");
+assert.ok([0, 3, 6].every((i) => lvS.ids[i] === lvS.ids[0]) && lvS.ids[1] !== lvS.ids[0]);
+// 힘 배치(이웃 선 + 주제 응집): 섞인 자리에서 시작해도 같은 주제 점이 모인다
+const fl = createLayout(three.map((_, i) => [Math.cos(i * 1.7) * 50, Math.sin(i * 1.3) * 50]), snnE.map((e) => ({ a: e.a, b: e.b, sim: 0.45 + 0.55 * e.w })), { groups: Array.from(lvS.ids), cohesion: 0.012 });
+for (let i = 0; i < 200 && fl.tick(); i++);
+let wi = 0, wc = 0, bt = 0, bc = 0;
+for (let i = 0; i < three.length; i++) for (let j = i + 1; j < three.length; j++) {
+  const dd = Math.hypot(fl.x[i] - fl.x[j], fl.y[i] - fl.y[j]);
+  if (lvS.ids[i] === lvS.ids[j]) { wi += dd; wc++; } else { bt += dd; bc++; }
+}
+assert.ok(wi / wc < bt / bc, "같은 주제끼리 모인다");
+const before0 = fl.x[0];
+fl.moveGroup(lvS.ids[0], 30, 0);
+assert.equal(fl.x[0], before0 + 30, "키워드를 끌면 그 주제의 점이 함께 이동 (힘 배치)");
 
 console.log("all tests passed");

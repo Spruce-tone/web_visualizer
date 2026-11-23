@@ -335,7 +335,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       data.layout.moveGroup(drag.cluster, wx - drag.wx, wy - drag.wy);
       drag.wx = wx; drag.wy = wy; drag.moved = true;
       tooltip.hidden = true;
-      if (!raf) draw();
+      if (data.layout.alpha > 0.02) animate(); else if (!raf) draw();
       return;
     }
     if (drag?.type === "node") {

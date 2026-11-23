@@ -139,9 +139,11 @@ assert.equal(focus.parentId, "P");
 sent.length = 0;
 chrome.tabs.sendMessage = async (_id, msg) => { sent.push(msg); return msg.type === "WV_FOCUS" ? { ok: false, need: "navigate", t: 42, paused: false } : msg.type === "WV_COLLECT_ALL" ? { ok: true, data: structuredClone(fixture) } : { ok: true }; };
 let injected = null;
-chrome.scripting.executeScript = async (opts) => { injected = opts; return [{ result: true }]; };
+const injections = [];
+chrome.scripting.executeScript = async (opts) => { injections.push(opts); if (opts.func) injected = opts; return [{ result: true }]; };
 await api.gotoComment();
 assert.equal(injected.world, "MAIN");
+assert.ok(injections.some((o) => o.world === "MAIN" && o.files?.includes("content/page-bridge.js")), "댓글을 열기 전에 페이지 쪽 다리를 넣어 준다");
 assert.deepEqual(injected.args, ["VID", comments[replyIdx].id]);
 assert.equal(sent.find((m) => m.type === "WV_FOCUS_WAIT").t, 42, "보던 위치를 함께 전달");
 // 다른 영상이 열려 있으면 이동하지 않고 안내
