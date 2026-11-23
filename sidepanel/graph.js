@@ -37,12 +37,12 @@ export function createGraph(canvas, tooltip, { onClick } = {}) {
     ctx.clearRect(0, 0, width, height);
     if (!data) return;
     const { edges, nodes } = data;
-    const focus = data.focusCluster ?? null;
+    const focus = data.focus || null; // Set<nodeIndex> | null
 
     ctx.lineWidth = 1;
     for (const e of edges) {
       const [x1, y1] = toScreen(e.a), [x2, y2] = toScreen(e.b);
-      const dim = focus !== null && nodes[e.a].cluster !== focus;
+      const dim = focus && !(focus.has(e.a) && focus.has(e.b));
       ctx.strokeStyle = css("--edge");
       ctx.globalAlpha = dim ? 0.05 : 0.15 + 0.6 * Math.max(0, e.sim - 0.4);
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
@@ -50,10 +50,15 @@ export function createGraph(canvas, tooltip, { onClick } = {}) {
     ctx.globalAlpha = 1;
     nodes.forEach((nd, i) => {
       const [x, y] = toScreen(i);
-      const dim = focus !== null && nd.cluster !== focus && nd.kind !== "doc";
-      ctx.globalAlpha = dim ? 0.15 : 1;
+      const dim = focus && !focus.has(i) && nd.kind !== "doc";
+      ctx.globalAlpha = dim ? 0.12 : 1;
       ctx.fillStyle = color(nd);
-      ctx.beginPath(); ctx.arc(x, y, radius(nd) * Math.sqrt(view.k), 0, Math.PI * 2); ctx.fill();
+      const r = radius(nd) * Math.sqrt(view.k);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      if (nd.flag) { // 복붙 의심 신호가 높은 묶음의 댓글
+        ctx.strokeStyle = css("--warn"); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, r + 2.5, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 1;
+      }
       if (i === hover || nd.kind === "doc") {
         ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1;
       }
@@ -129,7 +134,8 @@ export function createGraph(canvas, tooltip, { onClick } = {}) {
       };
       loop();
     },
-    focus(cluster) { if (data) { data.focusCluster = cluster; draw(); } },
+    /** @param {Set<number>|null} nodeSet 강조할 노드 인덱스 */
+    focus(nodeSet) { if (data) { data.focus = nodeSet; draw(); } },
     redraw: draw,
     palette: PALETTE,
   };

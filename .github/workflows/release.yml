@@ -1,0 +1,54 @@
+# main 에 푸시될 때마다: 테스트 → 의미 모델 라이브러리 번들 → 설치용 zip → GitHub Releases 에 업로드
+# 항상 같은 주소로 최신 zip 을 받을 수 있다:
+#   https://github.com/<owner>/<repo>/releases/latest/download/web-visualizer.zip
+name: Build extension zip
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Test
+        run: npm test
+
+      - name: Bundle Transformers.js into vendor/
+        run: npm run vendor
+
+      - name: Package
+        run: |
+          mkdir -p dist/web-visualizer
+          cp -r manifest.json background.js content lib sidepanel vendor dist/web-visualizer/
+          cd dist && zip -qr web-visualizer.zip web-visualizer
+          ls -lh web-visualizer.zip
+
+      - name: Publish release (rolling "latest-build")
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          gh release delete latest-build --yes --cleanup-tag || true
+          gh release create latest-build dist/web-visualizer.zip \
+            --target "${{ github.sha }}" \
+            --latest \
+            --title "Web Visualizer v${VERSION} (build ${{ github.run_number }})" \
+            --notes "설치: zip 압축 해제 → chrome://extensions → 개발자 모드 → '압축해제된 확장 프로그램을 로드' → 풀린 web-visualizer 폴더 선택. 커밋: ${{ github.sha }}"

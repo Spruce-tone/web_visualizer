@@ -48,7 +48,8 @@ assert.equal(h[0].count, 2);
 const { hashEmbed } = await import("../lib/embed/hash.js");
 const { dot, topKNeighbors, edgesFromNeighbors, clustersFromEdges, pca2 } = await import("../lib/vec.js");
 const { createLayout } = await import("../lib/layout.js");
-const { clusterSignals } = await import("../lib/analyze.js");
+const { clusterSignals, topicSummaries } = await import("../lib/analyze.js");
+const { adaptiveThreshold } = await import("../lib/vec.js");
 
 const texts = [
   "이 영상 진짜 최고네요! 구독 박고 갑니다",
@@ -89,5 +90,14 @@ assert.ok(copy.score >= 50, `복붙 묶음은 높은 신호 (score=${copy.score}
 const lol = sig.find((s) => s.indices.includes(5));
 assert.equal(lol.score, 0, "짧은 반응은 신호 0");
 assert.ok(sig.every((s) => s.reasons.every((r) => !r.includes("조작"))), "'조작' 판정 문구 금지");
+
+// 적응형 임계값 / 주제 요약
+const th = adaptiveThreshold(nbrs, 2);
+assert.ok(th > -1 && th <= 1, `임계값 범위 (${th})`);
+assert.equal(adaptiveThreshold([], 2), 0.5);
+const ts = topicSummaries(groups, fakeComments, edges, texts.map(() => 0.5));
+assert.equal(ts[0].size, 3);
+assert.ok(texts.slice(0, 3).includes(ts[0].sample), "대표 댓글은 묶음 안에서 선택");
+assert.equal(ts[0].docSim, 0.5);
 
 console.log("all tests passed");

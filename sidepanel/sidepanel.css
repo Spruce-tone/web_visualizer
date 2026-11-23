@@ -45,6 +45,10 @@ button.link { border: 0; padding: 0; margin-top: 16px; color: var(--muted); text
 .clusters .score.hi { color: var(--warn); }
 .clusters .sample { margin: 3px 0; }
 .clusters ul { margin: 0; padding-left: 16px; font-size: 11px; color: var(--muted); }
+h1 small { font-size: 11px; font-weight: 400; }
+.warn { color: var(--warn); }
+.row.slider { margin-top: 16px; }
+.clusters .score.none { color: var(--muted); font-weight: 400; }
 #hist svg { width: 100%; height: auto; display: block; }
 #hist rect { fill: var(--bar); }
 #hist text { fill: var(--muted); font-size: 9px; }
