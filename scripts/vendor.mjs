@@ -9,7 +9,7 @@ fs.mkdirSync(out, { recursive: true });
 
 const tf = "node_modules/@huggingface/transformers/dist/transformers.min.js";
 if (!fs.existsSync(tf)) {
-  console.error(`없음: ${tf}  → 먼저 npm install 을 실행하세요.`);
+  console.error(`없음: ${tf}  → 먼저 npm install --ignore-scripts 를 실행하세요.`);
   process.exit(1);
 }
 fs.copyFileSync(tf, path.join(out, "transformers.min.js"));

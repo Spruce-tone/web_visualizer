@@ -44,7 +44,7 @@
 ```bash
 git clone https://github.com/Spruce-tone/web_visualizer
 cd web_visualizer
-npm install && npm run vendor   # 의미 모델용 Transformers.js 를 vendor/ 로 복사 (MV3는 CDN 코드 금지)
+npm install --ignore-scripts && npm run vendor   # 의미 모델용 Transformers.js 를 vendor/ 로 복사 (MV3는 CDN 코드 금지)
 npm test
 ```
 이 폴더를 바로 "압축해제된 확장 프로그램"으로 로드해 개발할 수 있습니다.
