@@ -49,6 +49,18 @@ h1 small { font-size: 11px; font-weight: 400; }
 .warn { color: var(--warn); }
 .row.slider { margin-top: 16px; }
 .clusters .score.none { color: var(--muted); font-weight: 400; }
+#graph { height: 420px; outline: none; }
+button.small { padding: 3px 7px; font-size: 11px; }
+.row label input[type="checkbox"] { margin: 0; }
+.tagbar { display: grid; gap: 6px; margin-top: 6px; }
+.tags { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.tag { display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font-size: 11px; }
+.tag .sw { width: 10px; height: 10px; border: 2px solid var(--c); border-radius: 2px; flex: none; cursor: pointer; }
+.tag input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--fg); font: inherit; padding: 0; }
+.tag .n { color: var(--muted); cursor: pointer; }
+.help { margin-top: 6px; font-size: 11px; color: var(--muted); }
+.help summary { cursor: pointer; }
+.help ul { padding-left: 16px; margin: 4px 0; }
 #hist svg { width: 100%; height: auto; display: block; }
 #hist rect { fill: var(--bar); }
 #hist text { fill: var(--muted); font-size: 9px; }

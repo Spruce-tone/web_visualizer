@@ -1,12 +1,12 @@
 // 역할 분리
 // - 문구 임베딩(n-gram 해싱, 항상 계산, 즉시): 복붙·템플릿 의심 신호
-// - 의미 임베딩(EmbeddingGemma, 선택): 그래프 배치, 주제 묶음(색), 본문 관련도
+// - 의미 임베딩(Qwen3-Embedding / EmbeddingGemma, 선택): 그래프 배치, 주제 묶음(색), 본문 관련도
 //   의미 모델을 못 쓰면 문구 임베딩으로 대체한다.
 import { hashEmbed } from "../lib/embed/hash.js";
 import { dot, topKNeighbors, edgesFromNeighbors, clustersFromEdges, pca2, adaptiveThreshold } from "../lib/vec.js";
 import { createLayout } from "../lib/layout.js";
-import { timeHistogram, clusterSignals, topicSummaries } from "../lib/analyze.js";
-import { createGraph } from "./graph.js";
+import { timeHistogram, clusterSignals, topicSummaries, authorActivity } from "../lib/analyze.js";
+import { createGraph, TAG_COLORS } from "./graph.js";
 
 const $ = (id) => document.getElementById(id);
 const FLAG_SCORE = 50;
@@ -14,14 +14,20 @@ const FLAG_SCORE = 50;
 // 모든 상태는 메모리에만. 패널을 닫으면 사라진다.
 let S = null;
 let focusKey = null;
+const tagNames = ["분류 1", "분류 2", "분류 3", "분류 4"];
 
 $("ver").textContent = "v" + chrome.runtime.getManifest().version;
 
 const graph = createGraph($("graph"), $("tooltip"), {
-  onClick: (i) => {
+  onClick: async (i) => {
     if (i === 0 || !S) return; // 0 = 본문 노드
-    send("WV_FOCUS", { id: S.comments[i - 1].id }).catch(() => {});
+    try {
+      const r = await send("WV_FOCUS", { id: S.comments[i - 1].id });
+      if (r?.navigated) setStatus("페이지에 아직 없는 댓글이라, 해당 댓글이 맨 위에 보이도록 영상을 다시 열었어요.");
+    } catch { /* 무시 */ }
   },
+  onTagsChange: (counts) => renderTags(counts),
+  onSelectionChange: (n) => ($("sel-count").textContent = `선택 ${n}개`),
 });
 
 function setStatus(msg, isError = false) {
@@ -29,9 +35,14 @@ function setStatus(msg, isError = false) {
   $("status").classList.toggle("error", isError);
 }
 
-async function send(type, extra = {}) {
+async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url?.includes("youtube.com/watch")) throw new Error("YouTube 영상 페이지에서 사용하세요. (현재 YouTube만 지원)");
+  return tab;
+}
+
+async function send(type, extra = {}) {
+  const tab = await activeTab();
   try {
     return await chrome.tabs.sendMessage(tab.id, { type, ...extra });
   } catch {
@@ -40,38 +51,59 @@ async function send(type, extra = {}) {
   }
 }
 
+// 수집 진행률 (content script → 패널)
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type === "WV_PROGRESS") {
+    setStatus(`댓글 수집 중… ${msg.count.toLocaleString()}개${msg.total ? ` / 전체 약 ${msg.total.toLocaleString()}개` : ""}`);
+  }
+});
+
+function setBusy(busy) {
+  document.querySelectorAll(".controls button, .controls select, .controls input").forEach((b) => (b.disabled = busy));
+  $("btn-cancel").hidden = !busy;
+  $("btn-cancel").disabled = false;
+}
+
+const yieldUI = () => new Promise((r) => setTimeout(r, 0));
+
 async function run(type, extra) {
-  const buttons = document.querySelectorAll("button, select");
-  buttons.forEach((b) => (b.disabled = true));
+  setBusy(true);
   try {
-    setStatus(type === "WV_LOAD_MORE" ? "스크롤하며 댓글 불러오는 중… (탭을 그대로 두세요)" : "댓글 읽는 중…");
+    setStatus(type === "WV_COLLECT_ALL" ? "댓글 수집 시작…" : "보이는 댓글 읽는 중…");
     const res = await send(type, extra);
     if (!res?.ok) throw new Error(res?.error || "응답 없음");
     const { doc, comments } = res.data;
-    if (!comments.length) throw new Error("댓글을 찾지 못했어요. 댓글 영역까지 스크롤한 뒤 다시 시도하세요.");
+    if (!comments.length) throw new Error("댓글을 찾지 못했어요. 댓글이 꺼져 있는지 확인하세요.");
+    const notes = [];
+    if (res.fallback) notes.push(`전체 수집 실패(${res.fallback}) → 보이는 댓글만 분석`);
+    if (doc.meta.collection?.cancelled) notes.push("중지됨 — 수집한 만큼 분석");
 
     const texts = [`${doc.title}\n${doc.text}`.slice(0, 1500), ...comments.map((c) => c.text)];
     const t0 = performance.now();
 
     // 1) 문구 임베딩 — 항상
+    setStatus(`문구 분석 중… (${comments.length.toLocaleString()}개)`);
+    await yieldUI();
     const lexVecs = hashEmbed(texts).slice(1);
     const lexNbrs = topKNeighbors(lexVecs, 8);
     const t1 = performance.now();
 
     // 2) 의미 임베딩 — 선택, 실패 시 문구 임베딩으로 대체
-    let semAll = null, device = null, warn = "";
-    if ($("mode").value === "auto") {
+    let semAll = null, device = null, modelLabel = null;
+    const mode = $("mode").value;
+    if (mode !== "fast") {
       try {
-        setStatus(`의미 임베딩 준비 중… (${comments.length}개)`);
         const { semanticEmbed } = await import("../lib/embed/semantic.js");
-        ({ vecs: semAll, device } = await semanticEmbed(texts, { onStatus: setStatus }));
+        ({ vecs: semAll, device, label: modelLabel } = await semanticEmbed(texts, { model: mode, onStatus: setStatus }));
       } catch (e) {
         console.warn("[WV] semantic failed", e);
-        warn = ` · 의미 모델 사용 불가(${e.message}) → 문구 임베딩으로 대체`;
+        notes.push(`의미 모델 사용 불가(${e.message}) → 문구 임베딩으로 대체`);
       }
     }
     const t2 = performance.now();
 
+    setStatus("그래프 계산 중…");
+    await yieldUI();
     const layoutAll = semAll || hashEmbed(texts);
     const semVecs = layoutAll.slice(1);
     const semNbrs = semAll ? topKNeighbors(semVecs, 8) : lexNbrs;
@@ -79,22 +111,21 @@ async function run(type, extra) {
     const init = pca2(layoutAll);
     const t3 = performance.now();
 
-    S = { doc, comments, lexNbrs, semNbrs, docSims, init, semantic: !!semAll, device };
+    S = { doc, comments, lexNbrs, semNbrs, docSims, init, semantic: !!semAll, device, modelLabel };
     setSlider("th-sem", adaptiveThreshold(semNbrs, 2));
-    focusKey = null;
     rebuild();
 
-    const ms = (a, b) => `${Math.round(b - a)}ms`;
+    const sec = (a, b) => `${((b - a) / 1000).toFixed(1)}초`;
     setStatus(
-      `댓글 ${comments.length}개 · 문구 ${ms(t0, t1)}` +
-      (semAll ? ` · 의미(${device === "webgpu" ? "GPU" : "CPU"}) ${ms(t1, t2)}` : "") +
-      ` · 그래프 ${ms(t2, t3)}${warn}`,
-      !!warn
+      [`댓글 ${comments.length.toLocaleString()}개`, `문구 ${sec(t0, t1)}`,
+        semAll ? `의미(${device === "webgpu" ? "GPU" : "CPU"}) ${sec(t1, t2)}` : null,
+        `그래프 ${sec(t2, t3)}`, ...notes].filter(Boolean).join(" · "),
+      notes.some((n) => n.includes("실패") || n.includes("불가"))
     );
   } catch (e) {
     setStatus(e.message, true);
   } finally {
-    buttons.forEach((b) => (b.disabled = false));
+    setBusy(false);
   }
 }
 
@@ -119,6 +150,7 @@ function rebuild() {
   const semEdges = edgesFromNeighbors(semNbrs, thSem);
   const topic = clustersFromEdges(comments.length, semEdges);
   const topics = topicSummaries(topic.groups, comments, semEdges, docSims);
+  const authors = authorActivity(comments, { minCount: 3, topicIds: topic.ids });
 
   // 그래프: 0 = 본문, 1..n = 댓글
   const gEdges = semEdges.map((e) => ({ a: e.a + 1, b: e.b + 1, sim: e.sim }));
@@ -127,8 +159,8 @@ function rebuild() {
     { kind: "doc", label: doc.title, sub: "본문(제목+설명)", cluster: -1 },
     ...comments.map((c, i) => ({
       kind: "comment",
-      label: c.text.slice(0, 140),
-      sub: `${c.author} · ${c.createdAtRaw} · ♥ ${c.likes} · 본문 관련도 ${docSims[i].toFixed(2)}${flagged.has(i) ? " · 복붙 의심 신호" : ""}`,
+      label: c.text.slice(0, 160),
+      sub: `${c.parentId ? "↳ 답글 · " : ""}${c.author} · ${c.createdAtRaw} · ♥ ${c.likes} · 본문 관련도 ${docSims[i].toFixed(2)}${flagged.has(i) ? " · 복붙 의심 신호" : ""}`,
       cluster: topic.ids[i],
       likes: c.likes,
       flag: flagged.has(i),
@@ -140,6 +172,7 @@ function rebuild() {
   renderSummary(topic.groups, flagged);
   renderTopics(topics);
   renderSignals(signals);
+  renderAuthors(authors);
   renderHistogram();
 }
 
@@ -147,11 +180,13 @@ function renderSummary(topicGroups, flagged) {
   const { doc, comments } = S;
   $("result").hidden = false;
   $("doc-title").textContent = doc.title;
-  $("doc-meta").textContent = `${doc.author} · ${doc.site} · ${S.semantic ? "의미(EmbeddingGemma) + 문구 임베딩" : "문구 임베딩만"}`;
+  const total = doc.meta.totalComments ? ` / 전체 약 ${doc.meta.totalComments.toLocaleString()}` : "";
+  const how = S.semantic ? `${S.modelLabel.split(" · ")[1]} + 문구 임베딩` : "문구 임베딩만";
+  $("doc-meta").textContent = `${doc.author} · 수집 ${comments.length.toLocaleString()}${total} · ${how}`;
   const authors = new Set(comments.map((c) => c.authorId || c.author)).size;
   $("stats").innerHTML = [
-    [comments.length, "댓글"],
-    [authors, "작성자"],
+    [comments.length.toLocaleString(), "댓글"],
+    [authors.toLocaleString(), "작성자"],
     [topicGroups.filter((g) => g.length >= 3).length, "주제 묶음(3+)"],
     [`${Math.round((flagged.size / comments.length) * 100)}%`, "복붙 의심 비율"],
   ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
@@ -171,10 +206,13 @@ function clusterItem({ key, color, head, score, sample, reasons, indices }) {
     sc.textContent = `신호 ${score}`;
     h.append(sc);
   }
-  const s = document.createElement("div");
-  s.className = "sample";
-  s.textContent = `“${sample.slice(0, 100)}”`;
-  li.append(h, s);
+  li.append(h);
+  if (sample) {
+    const s = document.createElement("div");
+    s.className = "sample";
+    s.textContent = `“${sample.slice(0, 100)}”`;
+    li.append(s);
+  }
   if (reasons?.length) {
     const ul = document.createElement("ul");
     for (const r of reasons) { const x = document.createElement("li"); x.textContent = r; ul.append(x); }
@@ -183,18 +221,27 @@ function clusterItem({ key, color, head, score, sample, reasons, indices }) {
   li.onclick = () => {
     const on = focusKey !== key;
     focusKey = on ? key : null;
-    graph.focus(on ? new Set([0, ...indices.map((i) => i + 1)]) : null);
+    const nodeIdx = indices.map((i) => i + 1);
+    graph.focus(on ? new Set([0, ...nodeIdx]) : null);
+    if (on) graph.select(nodeIdx); else graph.clearSelection(); // 강조한 묶음을 바로 1~4 키로 분류할 수 있게 선택
     document.querySelectorAll(".clusters > li").forEach((x) => x.classList.remove("active"));
     if (on) li.classList.add("active");
   };
   return li;
 }
 
+function emptyItem(ol, text) {
+  const li = document.createElement("li");
+  li.className = "muted";
+  li.textContent = text;
+  ol.append(li);
+}
+
 function renderTopics(topics) {
   const ol = $("topics");
-  ol.innerHTML = "";
+  ol.replaceChildren();
   const list = topics.filter((t) => t.size >= 3).slice(0, 12);
-  if (!list.length) { ol.innerHTML = `<li class="muted">3개 이상인 묶음이 없어요. 기준을 낮춰 보세요.</li>`; return; }
+  if (!list.length) return emptyItem(ol, "3개 이상인 묶음이 없어요. 기준을 낮춰 보세요.");
   for (const t of list) {
     ol.append(clusterItem({
       key: "t" + t.cluster,
@@ -208,8 +255,8 @@ function renderTopics(topics) {
 
 function renderSignals(signals) {
   const ol = $("signals");
-  ol.innerHTML = "";
-  if (!signals.length) { ol.innerHTML = `<li class="muted">문구가 겹치는 묶음이 없어요.</li>`; return; }
+  ol.replaceChildren();
+  if (!signals.length) return emptyItem(ol, "문구가 겹치는 묶음이 없어요.");
   for (const s of signals.slice(0, 12)) {
     ol.append(clusterItem({
       key: "s" + s.cluster,
@@ -221,6 +268,47 @@ function renderSignals(signals) {
       indices: s.indices,
     }));
   }
+}
+
+function fmtSpan(ms) {
+  if (ms === null) return "시간 정보 없음";
+  const h = ms / 3600e3;
+  return h < 1 ? "1시간 이내에 작성" : h < 48 ? `${Math.round(h)}시간에 걸쳐 작성` : `${Math.round(h / 24)}일에 걸쳐 작성`;
+}
+
+function renderAuthors(authors) {
+  const ol = $("authors");
+  ol.replaceChildren();
+  if (!authors.length) return emptyItem(ol, "3개 이상 쓴 작성자가 없어요.");
+  for (const a of authors.slice(0, 10)) {
+    ol.append(clusterItem({
+      key: "a" + (a.authorId || a.author),
+      color: "var(--accent)",
+      head: `${a.author} · ${a.count}개 (${(a.share * 100).toFixed(1)}%) · 답글 ${a.replies} · ♥ ${a.likes}`,
+      reasons: [fmtSpan(a.span), a.topics !== null ? `주제 묶음 ${a.topics}곳에 등장` : null].filter(Boolean),
+      indices: a.indices,
+    }));
+  }
+}
+
+function renderTags(counts = [0, 0, 0, 0]) {
+  const box = $("tags");
+  if (!box.children.length) {
+    TAG_COLORS.forEach((c, t) => {
+      const el = document.createElement("div");
+      el.className = "tag";
+      el.style.setProperty("--c", c);
+      const sw = document.createElement("span"); sw.className = "sw"; sw.title = "이 분류의 댓글 선택";
+      const input = document.createElement("input"); input.value = tagNames[t]; input.title = `분류 이름 (키보드 ${t + 1})`;
+      input.oninput = () => (tagNames[t] = input.value);
+      const n = document.createElement("span"); n.className = "n"; n.title = "이 분류의 댓글 선택";
+      const pickTag = () => graph.select(graph.tagged(t));
+      sw.onclick = pickTag; n.onclick = pickTag;
+      el.append(sw, input, n);
+      box.append(el);
+    });
+  }
+  [...box.children].forEach((el, t) => (el.querySelector(".n").textContent = `${t + 1} · ${counts[t]}개`));
 }
 
 function renderHistogram() {
@@ -239,17 +327,29 @@ function renderHistogram() {
 }
 
 // 이벤트
-$("btn-extract").onclick = () => run("WV_EXTRACT");
-$("btn-more").onclick = () => run("WV_LOAD_MORE", { options: { max: Number($("max").value) || 300 } });
+$("btn-all").onclick = () => run("WV_COLLECT_ALL", {
+  options: { max: Number($("max").value), sort: $("sort").value, includeReplies: $("replies").checked },
+});
+$("btn-visible").onclick = () => run("WV_EXTRACT");
+$("btn-cancel").onclick = () => {
+  $("btn-cancel").disabled = true;
+  setStatus("중지하는 중… 지금까지 모은 댓글로 분석해요.");
+  send("WV_CANCEL").catch(() => {});
+};
 for (const id of ["th-sem", "th-lex"]) {
   $(id).oninput = () => { $(id + "-val").textContent = Number($(id).value).toFixed(2); };
   $(id).onchange = rebuild;
 }
 setSlider("th-lex", 0.6);
-$("mode").onchange = () => { if (S) setStatus("분석 방식이 바뀌었어요. 다시 분석하세요."); };
+renderTags();
+$("btn-clear-sel").onclick = () => graph.clearSelection();
+$("btn-unpin").onclick = () => graph.unpinAll();
+$("mode").onchange = () => { if (S) setStatus("의미 모델이 바뀌었어요. 다시 분석하면 적용돼요."); };
 $("btn-export").onclick = () => {
   if (!S) return;
-  const blob = new Blob([JSON.stringify({ doc: S.doc, comments: S.comments }, null, 2)], { type: "application/json" });
+  const tags = graph.tagsArray();
+  const comments = S.comments.map((c, i) => ({ ...c, manualTag: tags[i + 1] >= 0 ? tagNames[tags[i + 1]] : null }));
+  const blob = new Blob([JSON.stringify({ doc: S.doc, comments }, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `${S.doc.id.replace(":", "_")}.json`;
@@ -261,6 +361,6 @@ $("btn-export").onclick = () => {
 import("../lib/embed/semantic.js").then(async ({ semanticAvailable }) => {
   if (!(await semanticAvailable())) {
     $("mode").value = "fast";
-    $("mode").querySelector('option[value="auto"]').textContent += " — 미설치";
+    $("mode").querySelectorAll('option:not([value="fast"])').forEach((o) => (o.textContent += " — 미설치"));
   }
 });

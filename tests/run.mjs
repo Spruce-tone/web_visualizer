@@ -100,4 +100,74 @@ assert.equal(ts[0].size, 3);
 assert.ok(texts.slice(0, 3).includes(ts[0].sample), "대표 댓글은 묶음 안에서 선택");
 assert.equal(ts[0].docSim, 0.5);
 
+// --- YouTube 내부 API 응답 파싱 (2024~ entity 형식을 흉내낸 최소 샘플) ---
+const ep = (token) => ({ commandMetadata: { webCommandMetadata: { apiUrl: "/youtubei/v1/next" } }, continuationCommand: { token } });
+const sample = {
+  onResponseReceivedEndpoints: [
+    { reloadContinuationItemsCommand: { targetId: "comments-section", continuationItems: [
+      { commentsHeaderRenderer: { countText: { runs: [{ text: "댓글 " }, { text: "1,234" }, { text: "개" }] } } },
+      { commentThreadRenderer: { replies: { commentRepliesRenderer: { contents: [{ continuationItemRenderer: { continuationEndpoint: ep("REPLY1") } }] } } } },
+      { continuationItemRenderer: { continuationEndpoint: ep("NEXT1") } },
+    ] } },
+  ],
+  frameworkUpdates: { entityBatchUpdate: { mutations: [
+    { payload: { commentEntityPayload: {
+      properties: { commentId: "Ugx1", content: { content: "좋은 영상" }, publishedTime: "3일 전", toolbarStateKey: "k1" },
+      author: { displayName: "@kim", channelId: "UC1", isCreator: false },
+      toolbar: { likeCountNotliked: "1.2천", replyCount: "5" },
+    } } },
+    { payload: { commentEntityPayload: {
+      properties: { commentId: "Ugx1.r1", content: { content: "동의해요" }, publishedTime: "2일 전(수정됨)", toolbarStateKey: "k2" },
+      author: { displayName: "@lee", channelId: "UC2" },
+      toolbar: { likeCountNotliked: " ", replyCount: "" },
+    } } },
+    { payload: { engagementToolbarStateEntityPayload: { key: "k1", heartState: "TOOLBAR_HEART_STATE_HEARTED" } } },
+  ] } },
+};
+const pr = WV.parseInnertubeComments(sample, "youtube:x", { now });
+assert.equal(pr.total, 1234);
+assert.equal(pr.comments.length, 2);
+assert.equal(pr.comments[0].likes, 1200);
+assert.equal(pr.comments[0].meta.hearted, true);
+assert.equal(pr.comments[0].meta.replyCount, 5);
+assert.equal(pr.comments[1].parentId, "Ugx1");
+assert.equal(pr.comments[1].edited, true);
+assert.equal(pr.comments[1].likes, 0);
+assert.equal(pr.next[0].continuationCommand.token, "NEXT1");
+assert.equal(pr.replies[0].continuationCommand.token, "REPLY1");
+assert.equal(WV.parseInnertubeComments(sample, "x", { includeReplies: false }).replies.length, 0);
+
+const html = `<script>ytcfg.set({"INNERTUBE_API_KEY":"K","INNERTUBE_CONTEXT":{"client":{"clientVersion":"2.1"}}});</script><script>var ytInitialData = {"a":{"itemSectionRenderer":{"x":1}}};</script>`;
+const wh = WV.parseWatchHtml(html);
+assert.equal(wh.cfg.INNERTUBE_API_KEY, "K");
+assert.ok(wh.data.a.itemSectionRenderer);
+
+// --- 설명 가능한 근거 / 작성자 활동 ---
+const { sharedPhrases, authorActivity } = await import("../lib/analyze.js");
+const sp = sharedPhrases(["이 정책은 국민을 위한 최고의 선택", "이 정책은 국민을 위한 좋은 선택", "이 정책은 국민을 위한 최선"]);
+assert.equal(sp[0], "이 정책은 국민을 위한");
+assert.ok(copy.reasons.some((r) => r.startsWith("공통 표현")), "복붙 묶음에 공통 표현 근거");
+const act = authorActivity([
+  { author: "a", authorId: "A", text: "1", likes: 1, createdAtApprox: "2026-11-20T00:00:00Z" },
+  { author: "a", authorId: "A", text: "2", likes: 2, parentId: "p", createdAtApprox: "2026-11-20T01:00:00Z" },
+  { author: "a", authorId: "A", text: "3", likes: 0, createdAtApprox: "2026-11-20T02:00:00Z" },
+  { author: "b", authorId: "B", text: "4", likes: 0, createdAtApprox: null },
+], { minCount: 3, topicIds: [0, 0, 1, -1] });
+assert.equal(act.length, 1);
+assert.equal(act[0].count, 3);
+assert.equal(act[0].replies, 1);
+assert.equal(act[0].span, 2 * 3600e3);
+assert.equal(act[0].topics, 2);
+
+// --- 레이아웃: 손으로 고정 ---
+const many = Array.from({ length: 400 }, (_, i) => [Math.cos(i), Math.sin(i * 1.3)]);
+const lay2 = createLayout(many, [], {});
+lay2.fix(5, 123, -45);
+for (let i = 0; i < 50; i++) lay2.tick();
+assert.equal(lay2.x[5], 123);
+assert.equal(lay2.y[5], -45);
+lay2.release(5); lay2.reheat(0.5);
+for (let i = 0; i < 5; i++) lay2.tick();
+assert.ok([...lay2.x, ...lay2.y].every(Number.isFinite));
+
 console.log("all tests passed");

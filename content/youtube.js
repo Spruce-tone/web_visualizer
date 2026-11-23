@@ -7,7 +7,6 @@
     title: "ytd-watch-metadata h1, h1.ytd-watch-metadata, #title h1",
     channel: "ytd-watch-metadata #channel-name a, #owner #channel-name a",
     description: "ytd-watch-metadata #description-inline-expander, #description",
-    commentsSection: "ytd-comments#comments, #comments",
     thread: "ytd-comment-thread-renderer",
     // 신형(ytd-comment-view-model) / 구형(ytd-comment-renderer) 모두 대응
     comment: "ytd-comment-view-model, ytd-comment-renderer",
@@ -47,18 +46,8 @@
   }
 
   function extract() {
-    const id = videoId();
-    const doc = {
-      id: `youtube:${id}`,
-      site: "youtube",
-      url: location.href,
-      title: WV.text(document.querySelector(SEL.title)) || document.title,
-      author: WV.text(document.querySelector(SEL.channel)),
-      publishedAt: null,
-      text: WV.text(document.querySelector(SEL.description)).slice(0, 5000),
-      meta: { videoId: id },
-      extractedAt: new Date().toISOString(),
-    };
+    const doc = docMeta();
+    doc.meta.collection = { method: "dom" };
 
     const comments = [];
     const seen = new Set();
@@ -78,20 +67,87 @@
     return { doc, comments };
   }
 
-  async function loadMore({ max = 300, idleRounds = 3 } = {}) {
-    const section = document.querySelector(SEL.commentsSection);
-    if (section) section.scrollIntoView();
-    await WV.sleep(1500);
-    let last = -1, idle = 0;
-    while (idle < idleRounds) {
-      const n = document.querySelectorAll(SEL.thread).length;
-      if (n >= max) break;
-      idle = n === last ? idle + 1 : 0;
-      last = n;
-      window.scrollTo(0, document.documentElement.scrollHeight);
-      await WV.sleep(1500);
+  // ---- 전체 댓글 수집: YouTube 웹이 쓰는 내부 API(youtubei/v1/next)를 같은 출처에서 호출 ----
+  let cancelled = false;
+
+  function docMeta() {
+    const id = videoId();
+    return {
+      id: `youtube:${id}`,
+      site: "youtube",
+      url: location.href,
+      title: WV.text(document.querySelector(SEL.title)) || document.title,
+      author: WV.text(document.querySelector(SEL.channel)),
+      publishedAt: null,
+      text: WV.text(document.querySelector(SEL.description)).slice(0, 5000),
+      meta: { videoId: id },
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
+  async function callNext(endpoint, cfg) {
+    const url = new URL(endpoint.commandMetadata?.webCommandMetadata?.apiUrl || "/youtubei/v1/next", location.origin);
+    if (cfg.INNERTUBE_API_KEY) url.searchParams.set("key", cfg.INNERTUBE_API_KEY);
+    url.searchParams.set("prettyPrint", "false");
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-YouTube-Client-Name": String(cfg.INNERTUBE_CONTEXT_CLIENT_NAME || 1),
+        "X-YouTube-Client-Version": cfg.INNERTUBE_CLIENT_VERSION || cfg.INNERTUBE_CONTEXT?.client?.clientVersion || "",
+      },
+      body: JSON.stringify({ context: cfg.INNERTUBE_CONTEXT, continuation: endpoint.continuationCommand.token }),
+    });
+    if (!res.ok) throw new Error(`YouTube 응답 오류 ${res.status}`);
+    return res.json();
+  }
+
+  /**
+   * @param {{max:number, sort:"top"|"new", includeReplies:boolean}} opts
+   */
+  async function collectAll({ max = 1000, sort = "top", includeReplies = true } = {}) {
+    cancelled = false;
+    const doc = docMeta();
+    const progress = (count, total) => chrome.runtime.sendMessage({ type: "WV_PROGRESS", count, total }).catch(() => {});
+
+    const html = await (await fetch(`/watch?v=${encodeURIComponent(doc.meta.videoId)}`, { credentials: "same-origin" })).text();
+    const { cfg, data } = WV.parseWatchHtml(html);
+    if (!cfg.INNERTUBE_CONTEXT || !data) throw new Error("YouTube 설정을 읽지 못했어요.");
+
+    // 댓글 섹션 → 정렬 메뉴(인기/최신) endpoint
+    const section = [...WV.searchDict(data, "itemSectionRenderer")].find((s) => WV.first(s, "continuationItemRenderer"));
+    if (!section) throw new Error("댓글이 꺼져 있거나 찾을 수 없어요.");
+    let first = await callNext(WV.first(WV.first(section, "continuationItemRenderer"), "continuationEndpoint"), cfg);
+    const sortItems = WV.first(first, "sortFilterSubMenuRenderer")?.subMenuItems || [];
+    const sortEndpoint = sortItems[sort === "new" ? 1 : 0]?.serviceEndpoint;
+
+    const queue = [];
+    const comments = [];
+    const seen = new Set();
+    let total = null;
+    let pending = sortEndpoint ? null : first; // 정렬 메뉴가 없으면 첫 응답부터 바로 사용
+    if (sortEndpoint) queue.push(sortEndpoint);
+
+    while ((pending || queue.length) && comments.length < max && !cancelled) {
+      const resp = pending || (await callNext(queue.shift(), cfg));
+      pending = null;
+      const r = WV.parseInnertubeComments(resp, doc.id, { includeReplies });
+      if (r.error && !comments.length) throw new Error(r.error);
+      if (r.total) total = r.total;
+      for (const c of r.comments) {
+        if (seen.has(c.id) || comments.length >= max) continue;
+        seen.add(c.id);
+        comments.push(c);
+      }
+      queue.unshift(...r.replies); // 답글을 먼저 받아 스레드를 붙여서 수집
+      queue.push(...r.next);
+      progress(comments.length, total);
+      await WV.sleep(120); // 서버 부담 줄이기
     }
-    return document.querySelectorAll(SEL.thread).length;
+    doc.meta.totalComments = total;
+    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled, complete: !queue.length && !cancelled };
+    return { doc, comments };
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -109,16 +165,29 @@
         el.style.outlineOffset = "4px";
         setTimeout(() => (el.style.outline = "3px solid transparent"), 1800);
       }
-      sendResponse({ ok: !!el });
+      if (!el && msg.id) {
+        // 아직 페이지에 로드되지 않은 댓글 → lc 파라미터로 열면 YouTube가 맨 위에 고정해 보여준다
+        const u = new URL(location.href);
+        u.searchParams.set("lc", msg.id);
+        location.href = u.toString();
+      }
+      sendResponse({ ok: !!el, navigated: !el });
     } else if (msg.type === "WV_EXTRACT") {
       try { sendResponse({ ok: true, data: extract() }); }
       catch (e) { sendResponse({ ok: false, error: String(e) }); }
-    } else if (msg.type === "WV_LOAD_MORE") {
-      loadMore(msg.options).then(
-        (count) => sendResponse({ ok: true, data: extract(), threadCount: count }),
-        (e) => sendResponse({ ok: false, error: String(e) })
+    } else if (msg.type === "WV_COLLECT_ALL") {
+      collectAll(msg.options).then(
+        (data) => sendResponse({ ok: true, data }),
+        (e) => {
+          // 내부 API가 실패하면 화면에 보이는 댓글로 대체
+          try { sendResponse({ ok: true, data: extract(), fallback: String(e.message || e) }); }
+          catch { sendResponse({ ok: false, error: String(e.message || e) }); }
+        }
       );
       return true; // 비동기 응답
+    } else if (msg.type === "WV_CANCEL") {
+      cancelled = true;
+      sendResponse({ ok: true });
     }
   });
 })();
