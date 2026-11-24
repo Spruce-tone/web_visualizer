@@ -945,4 +945,11 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(pairMean(g, f2), pairMean(g, f2));
 }
 
+// '자동' 모델은 기기(GPU 유무)와 상관없이 Bekko (검증 세트 근거: docs/validation.md)
+{
+  const sem = await import("../lib/embed/semantic.js");
+  assert.equal(await sem.resolveModel("auto"), "bekko");
+  assert.equal(await sem.resolveModel("gemma"), "gemma", "직접 고르면 그대로");
+}
+
 console.log("all tests passed");
