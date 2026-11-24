@@ -486,4 +486,37 @@ const before0 = fl.x[0];
 fl.moveGroup(lvS.ids[0], 30, 0);
 assert.equal(fl.x[0], before0 + 30, "키워드를 끌면 그 주제의 점이 함께 이동 (힘 배치)");
 
+// ---- 겹침 분류 (여러 주제) ----
+const { overlapTopics, OVERLAP_MAX_EXTRA } = await import("../lib/community.js");
+{
+  // 두 주제 A(0~4), B(5~9), 서로 잘 이어진 덩어리. 다리 점 10(주 주제 A)은 A와 B 양쪽에 비슷하게 이어짐.
+  const clique = (xs, w) => { const e = []; for (let p = 0; p < xs.length; p++) for (let q = p + 1; q < xs.length; q++) e.push({ a: xs[p], b: xs[q], w }); return e; };
+  const ids = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0];
+  const base = [...clique([0, 1, 2, 3, 4], 0.6), ...clique([5, 6, 7, 8, 9], 0.6)];
+  // 겹침 없음: 다리 점이 A에만 이어지면 보조 주제 없음
+  const none = overlapTopics(ids, [...base, { a: 10, b: 0, w: 0.5 }, { a: 10, b: 1, w: 0.5 }]);
+  assert.ok(none.extra.every((x) => x.length === 0), "겹침 없음");
+  assert.deepEqual(none.members.get(0), [0, 1, 2, 3, 4, 10]);
+  // 두 주제 사이 댓글: A 쪽 2개, B 쪽 2개 → B에도 속함, 주 주제는 그대로
+  const bridge = overlapTopics(ids, [...base, { a: 10, b: 0, w: 0.5 }, { a: 10, b: 1, w: 0.5 }, { a: 10, b: 5, w: 0.4 }, { a: 10, b: 6, w: 0.4 }]);
+  assert.deepEqual(bridge.extra[10], [1], "두 주제 사이 댓글은 다른 주제에도 속한다");
+  assert.ok(bridge.members.get(1).includes(10) && bridge.members.get(0).includes(10), "두 주제 목록 모두에 나온다");
+  assert.ok(bridge.extra.slice(0, 10).every((x) => x.length === 0), "덩어리 안쪽 댓글은 겹치지 않는다");
+  // 이웃 하나만 걸치면 넣지 않는다 (우연)
+  const one = overlapTopics(ids, [...base, { a: 10, b: 0, w: 0.3 }, { a: 10, b: 5, w: 0.3 }]);
+  assert.deepEqual(one.extra[10], [], "이웃 하나만 걸친 주제는 넣지 않는다");
+  // 최대 개수: 네 주제에 고르게 이어진 점 → 보조는 OVERLAP_MAX_EXTRA개까지, 강한 순
+  const ids4 = [0, 0, 1, 1, 2, 2, 3, 3, 0]; // 점 8: 주제 0·1 쪽 1.0씩, 2·3 쪽 0.9씩 → 세 주제가 기준을 넘음
+  const e4 = [[0, 0.5], [1, 0.5], [2, 0.5], [3, 0.5], [4, 0.45], [5, 0.45], [6, 0.45], [7, 0.45]].map(([b, w]) => ({ a: 8, b, w }));
+  const many = overlapTopics(ids4, e4);
+  assert.equal(many.extra[8].length, OVERLAP_MAX_EXTRA, "보조 주제는 최대 개수까지");
+  assert.deepEqual(many.extra[8], [1, 2], "강하게 이어진 주제부터");
+  // 주제 없는 점(-1: 본문·짧은 반응)은 계산에서 빠진다
+  const skip = overlapTopics([-1, 0, 0, 1, 1], [{ a: 0, b: 1, w: 1 }, { a: 0, b: 3, w: 1 }, { a: 1, b: 2, w: 1 }, { a: 3, b: 4, w: 1 }]);
+  assert.deepEqual(skip.extra[0], []);
+  assert.ok(!skip.members.get(0).includes(0));
+  // 결정적
+  assert.deepEqual(overlapTopics(ids, base).extra, overlapTopics(ids, base).extra);
+}
+
 console.log("all tests passed");

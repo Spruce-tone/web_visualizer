@@ -225,6 +225,20 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       ctx.moveTo(sx[i] + r, sy[i]); ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
     }
     ctx.stroke();
+    // 여러 주제에 속한 점: 가는 점선 테 (복붙 의심 테보다 가볍게)
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 2]);
+    ctx.strokeStyle = MAP.ink;
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      if (!nodes[i].also || !onScreen(i) || hiddenByFilter(nodes[i]) || (focus && !focus.has(i))) continue;
+      const r = rad[i] * rk + 2;
+      ctx.moveTo(sx[i] + r, sy[i]); ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+    ctx.restore();
     if (tagCount) {
       for (let i = 0; i < n; i++) {
         if (tags[i] < 0 || !onScreen(i)) continue;
@@ -377,7 +391,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     if (drag.type === "label" && !drag.moved) { // 키워드를 그냥 누르면 그 주제의 댓글을 모두 고른다
       const c = drag.cluster;
       selection = new Set();
-      data.nodes.forEach((nd, i) => { if (nd.cluster === c && nd.kind !== "doc") selection.add(i); });
+      data.nodes.forEach((nd, i) => { if ((nd.cluster === c || nd.also?.includes(c)) && nd.kind !== "doc") selection.add(i); }); // 보조로 속한 댓글도 함께
       emitSelection();
     }
     if (drag.type === "pan" && !drag.moved && selection.size) { selection.clear(); emitSelection(); onPick?.(-1); }

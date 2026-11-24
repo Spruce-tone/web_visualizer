@@ -8,7 +8,7 @@ import { hashEmbed } from "../lib/embed/hash.js";
 import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast } from "../lib/vec.js";
 import { kmeans, isShortReaction } from "../lib/cluster.js";
 import { fuzzyGraph, umapLayout, toPixels } from "../lib/umap.js";
-import { louvain, snnGraph } from "../lib/community.js";
+import { louvain, snnGraph, overlapTopics } from "../lib/community.js";
 import { createLayout } from "../lib/layout.js";
 import { timeHistogram } from "../lib/analyze.js";
 import { clusterSignals } from "../lib/signals.js";
@@ -298,8 +298,12 @@ function computeTopics() {
   const rank = new Map(order.map(([c], r) => [c, r]));
   ids = ids.map((c) => (c >= 0 ? rank.get(c) : -1));
   groups = groupsOf(ids);
-  kws = topicKeywords(groups, texts, { k: 4 });
+  kws = topicKeywords(groups, texts, { k: 4 }); // 키워드는 주 주제 기준 (보조로 들어온 댓글이 키워드를 흐리지 않게)
   const K = groups.length;
+  // 겹침: 이웃 그래프에서 다른 주제와도 강하게 이어진 댓글은 그 주제에도 넣는다 (지도 위치·색은 주 주제 그대로)
+  const ov = overlapTopics(Int32Array.from({ length: n + 1 }, (_, k) => (k === 0 ? -1 : ids[k - 1])), graphEdges);
+  const extraOf = Array.from({ length: n }, (_, i) => ov.extra[i + 1]);
+  const extraIn = (c) => (ov.members.get(c) || []).map((k) => k - 1).filter((i) => ids[i] !== c);
   // 대표 댓글: 같은 주제의 이웃과 가장 강하게 이어진 댓글
   const strength = new Float32Array(n);
   for (const { a, b, w } of graphEdges) { if (a && b && ids[a - 1] >= 0 && ids[a - 1] === ids[b - 1]) { strength[a - 1] += w; strength[b - 1] += w; } }
@@ -314,11 +318,11 @@ function computeTopics() {
       replies: items.filter((c) => c.parentId).length,
     };
   };
-  const topics = groups.map((g, c) => summarize(g, c, kws[c]));
+  const topics = groups.map((g, c) => { const t = summarize(g, c, kws[c]); const ex = extraIn(c); t.extra = ex.length; t.members = [...g, ...ex]; return t; });
   const sIdx = [];
   short.forEach((sh, i) => { if (sh) { sIdx.push(i); ids[i] = K; } });
-  if (sIdx.length) topics.push(summarize(sIdx, K, ["짧은 반응"], true));
-  return { topicKey: v, topic: { ids }, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), K };
+  if (sIdx.length) { const t = summarize(sIdx, K, ["짧은 반응"], true); t.extra = 0; t.members = sIdx; topics.push(t); }
+  return { topicKey: v, topic: { ids }, extraOf, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), K };
 }
 
 /** 기준이 바뀌면 필요한 쪽만 다시 계산. 손으로 옮긴 점과 내 분류는 유지한다. */
@@ -408,6 +412,7 @@ function drawMap({ fresh = false } = {}) {
         sub: `${c.parentId ? "답글  " : ""}${nameOf(keyOf(c), c.author)}  ${c.createdAtRaw}  ♥ ${num(c.likes)}`,
         reply: !!c.parentId,
         cluster: ids[i],
+        also: V.extraOf[i].length ? V.extraOf[i] : null,
         weight: Math.log1p(c.likes || 0) / Math.log1p(maxLikes),
         flag: V.flagged.has(i),
         tint: byTone ? TONE_TINT[S.tone.tones[i].label] : S.short[i] ? TONE_TINT.none : null,
@@ -448,7 +453,7 @@ function renderLegend() {
   } else if ($("color-by").value === "tone") {
     items = ["condemn", "praise", "mixed", "none"].map((k) => dot2("", TONE_LABEL[k], TONE_TINT[k][dark]));
   } else {
-    items = [dot2("", "댓글"), dot2("hollow", "답글"), dot2("ring", "복붙 의심"), dot2("doc", "본문"), dot2("small", "좋아요 적음"), dot2("big", "좋아요 많음")];
+    items = [dot2("", "댓글"), dot2("hollow", "답글"), dot2("ring", "복붙 의심"), dot2("multi", "여러 주제"), dot2("doc", "본문"), dot2("small", "좋아요 적음"), dot2("big", "좋아요 많음")];
   }
   $("map-legend").replaceChildren(...items);
 }
@@ -559,9 +564,9 @@ function renderTopics() {
     key: "t" + t.cluster,
     color: t.short ? "#8D98AB" : TOPIC_COLORS[t.cluster % TOPIC_COLORS.length],
     title: topicTitle(t),
-    meta: `댓글 ${num(t.size - t.replies)}개, 답글 ${num(t.replies)}개, 작성자 ${num(t.authors)}명, 좋아요 ${num(t.likes)}`,
+    meta: `댓글 ${num(t.size - t.replies)}개, 답글 ${num(t.replies)}개, 작성자 ${num(t.authors)}명, 좋아요 ${num(t.likes)}${t.extra ? ` · 다른 주제와 겹치는 댓글 +${num(t.extra)}개` : ""}`,
     sample: t.short ? "뜻으로 묶기 어려운 짧은 댓글을 따로 모았어요." : t.sample,
-    indices: t.indices,
+    indices: t.members,
     list: "t" + t.cluster,
   })), "묶을 댓글이 없어요.");
 }
@@ -574,11 +579,12 @@ const ROW = 68;
 /** 그 주제에 속한 댓글 인덱스 */
 function topicMembers(cluster) {
   const t = V.topics.find((x) => x.cluster === cluster);
-  return t ? t.indices : [];
+  return t ? t.members : [];
 }
+const topicShort = (c) => { const t = V.topics.find((x) => x.cluster === c); return !t ? "" : t.short ? "짧은 반응" : t.keywords[0] || `주제 ${c + 1}`; };
 function renderListOptions() {
   const opts = V.topics.map((t) => {
-    const o = el("option", "", `${t.short ? "짧은 반응" : topicTitle(t)} (${num(t.size)})`);
+    const o = el("option", "", `${t.short ? "짧은 반응" : topicTitle(t)} (${num(t.size)}${t.extra ? ` +겹침 ${num(t.extra)}` : ""})`);
     o.value = "t" + t.cluster;
     return o;
   });
@@ -616,6 +622,7 @@ function renderRows() {
   const sc = $("clist-scroll");
   const top = Number(sc.scrollTop) || 0, h = Number(sc.clientHeight) || 360;
   const first = Math.max(0, Math.floor(top / ROW) - 4), last = Math.min(listRows.length, Math.ceil((top + h) / ROW) + 4);
+  const cur = typeof listSrc === "string" && listSrc[0] === "t" ? Number(listSrc.slice(1)) : null;
   const out = [];
   for (let r = first; r < last; r++) {
     const i = listRows[r], c = S.comments[i];
@@ -625,6 +632,15 @@ function renderRows() {
     row.dataset.i = String(i);
     row.title = c.text.slice(0, 300);
     const m = el("div", "m", `${c.parentId ? "답글 · " : ""}${nameOf(keyOf(c), c.author)} · ${c.createdAtRaw || ""} · ♥ ${num(c.likes || 0)}`);
+    // 여러 주제에 속한 댓글: 이 목록 말고 다른 주제 이름을 칩으로
+    const own = V.topic.ids[i];
+    const ex = V.extraOf[i] || [];
+    for (const oc of ex.length ? [own, ...ex] : []) {
+      if (oc === cur) continue;
+      const chip = el("span", "also", `${oc === own ? "주 주제" : "다른 주제에도"}: ${topicShort(oc)}`);
+      chip.style.setProperty("--c2", topicColor(oc));
+      m.append(chip);
+    }
     row.append(el("div", "t", c.text), m);
     row.onclick = () => pickFromList(i);
     out.push(row);

@@ -110,7 +110,14 @@ assert.equal(V.commentLayout.x[1], mx + 40);
   let st = api.state();
   const t0 = st.V.topics[0];
   assert.equal(st.listSrc, "t" + t0.cluster, "목록은 처음에 가장 큰 주제");
-  assert.deepEqual([...st.listRows].sort((a, b) => a - b), [...t0.indices].sort((a, b) => a - b), "목록 = 그 주제의 댓글");
+  assert.deepEqual([...st.listRows].sort((a, b) => a - b), [...t0.members].sort((a, b) => a - b), "목록 = 그 주제의 댓글 (겹침 포함)");
+  // 겹침: 주 주제 댓글은 모두 들어 있고, 보조로 들어온 댓글은 extraOf에 그 주제가 있다
+  for (const t of st.V.topics) {
+    assert.ok(t.indices.every((i) => t.members.includes(i)));
+    assert.equal(t.members.length, t.indices.length + t.extra);
+    for (const i of t.members.slice(t.indices.length)) assert.ok(st.V.extraOf[i].includes(t.cluster) && st.V.topic.ids[i] !== t.cluster);
+  }
+  assert.ok(st.V.extraOf.every((x) => x.length <= 2), "보조 주제는 2개까지");
   const other = st.V.topics.find((t) => t.cluster !== t0.cluster);
   const j = other.indices[0];
   api.revealInList(j);
