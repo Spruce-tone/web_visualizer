@@ -598,11 +598,26 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   for (let i = 0; i < 400 && L.tick(); i++);
   const c2 = cen(L);
   assert.ok(Math.hypot(c2[0] - c1[0], c2[1] - c1[1]) < 1, "놓은 뒤에도 주제 중심이 그 자리에 머문다");
+  // 옮긴 주제 안의 점을 멀리 고정했다가 풀어도 주제가 튀지 않는다 (나머지 점은 한 프레임에 거의 그대로)
+  {
+    const p = mem[0], rest = mem.slice(1);
+    const rc = () => [rest.reduce((s, i) => s + L.x[i], 0) / rest.length, rest.reduce((s, i) => s + L.y[i], 0) / rest.length];
+    L.fix(p, L.x[p] + 400, L.y[p] - 300);
+    const a0 = rc(); L.tick(); const a1 = rc();
+    assert.ok(Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) < 1, "점을 고정해도 옮긴 주제가 튀지 않는다");
+    L.release(p);
+    const b0 = rc(); L.tick(); const b1 = rc();
+    assert.ok(Math.hypot(b1[0] - b0[0], b1[1] - b0[1]) < 1, "고정을 풀어도 옮긴 주제가 튀지 않는다");
+    for (let i = 0; i < 400 && L.tick(); i++);
+    const a2 = rc();
+    assert.ok(Math.hypot(a2[0] - a0[0], a2[1] - a0[1]) < 3, "풀린 점이 돌아오는 동안 주제는 조금만 움직인다");
+  }
+  const c1r = cen(L); // 위에서 점 하나를 고정했다 풀어 아주 조금 움직였으므로 지금 자리 기준
   // 다시 그릴 때 주제가 그대로면 옮긴 자리를 이어받는다
   const K2 = createLayout(three.map(() => [0, 0]), [], { groups: Array.from(lvS.ids), cohesion: 0.012, keep: L, alpha: 0.3 });
   for (let i = 0; i < 400 && K2.tick(); i++);
   const c3 = cen(K2);
-  assert.ok(Math.hypot(c3[0] - c1[0], c3[1] - c1[1]) < 1, "다시 그려도 옮긴 주제 자리를 이어받는다");
+  assert.ok(Math.hypot(c3[0] - c1r[0], c3[1] - c1r[1]) < 1, "다시 그려도 옮긴 주제 자리를 이어받는다");
   // 주제가 바뀌면(세밀도 변경 등) 옮긴 자리를 버린다
   const other = Array.from(lvS.ids, (g, i) => (i === mem[0] ? (g + 1) % 3 : g));
   const K3 = createLayout(three.map(() => [0, 0]), [], { groups: other, cohesion: 0.012, keep: L, alpha: 0.3 });

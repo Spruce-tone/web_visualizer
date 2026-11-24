@@ -376,14 +376,16 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       if (!raf) draw();
       return;
     }
-    const hl = pickLabel(mx, my);
-    const h = hl >= 0 ? -1 : pick(mx, my);
+    // 버튼을 누른 채(Shift+클릭 뒤 등) 지도 밖에 있으면 가리킨 점이 없다 → hover 강조를 남기지 않는다
+    const outside = ev.target !== canvas;
+    const hl = outside ? -1 : pickLabel(mx, my);
+    const h = outside || hl >= 0 ? -1 : pick(mx, my);
     if (h !== hover || hl !== hoverLabel) {
       hover = h; hoverLabel = hl;
       canvas.style.cursor = hl >= 0 ? "move" : h >= 0 && data.nodes[h].kind !== "doc" ? "pointer" : "grab";
       if (!raf) draw();
     }
-    if (ev.target === canvas) showTooltip(h, mx, my);
+    if (!outside) showTooltip(h, mx, my);
   });
 
   // 창 밖에서 버튼을 놓으면 mouseup이 오지 않는다 → 끌던 주제가 힘 계산에서 빠진 채 굳지 않게 끝낸다
@@ -393,7 +395,8 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     drag = null;
     animate();
   });
-  window.addEventListener("mouseup", () => {
+  window.addEventListener("mouseup", (ev) => {
+    if (ev.target !== canvas && (hover >= 0 || hoverLabel >= 0)) { hover = -1; hoverLabel = -1; tooltip.hidden = true; } // 지도 밖에서 놓음
     if (!drag || !data) { drag = null; return; }
     if (drag.type === "node" && !drag.moved) {
       selection = new Set([drag.i]);
