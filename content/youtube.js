@@ -70,7 +70,8 @@
   }
 
   // ---- 전체 댓글 수집: YouTube 웹이 쓰는 내부 API(youtubei/v1/next)를 같은 출처에서 호출 ----
-  let cancelled = false;
+  // 중지 표시와 실행 번호. 새 수집을 시작하면 이전 실행(예: 중지 뒤 물러나 쉬던 것)은 번호가 달라져 깨어나도 더 보내지 않고, 진행 메시지도 내지 않는다.
+  let cancelled = false, runSeq = 0;
 
   function docMeta() {
     const id = videoId();
@@ -110,8 +111,10 @@
    */
   async function collectAll({ max = 1000, sort = "top", includeReplies = true } = {}) {
     cancelled = false;
+    const run = ++runSeq;
+    const stopped = () => cancelled || run !== runSeq;
     const doc = docMeta();
-    const progress = (count, total, phase = "") => chrome.runtime.sendMessage({ type: "WV_PROGRESS", count, total, phase }).catch(() => {});
+    const progress = (count, total, phase = "") => { if (run === runSeq) chrome.runtime.sendMessage({ type: "WV_PROGRESS", count, total, phase }).catch(() => {}); };
 
     const html = await (await fetch(`/watch?v=${encodeURIComponent(doc.meta.videoId)}`, { credentials: "same-origin" })).text();
     const { cfg, data } = WV.parseWatchHtml(html);
@@ -136,9 +139,9 @@
       const queue = [];
       let pending = sortEndpoint ? null : first; // 정렬 메뉴가 없으면 첫 응답부터 바로 사용
       if (sortEndpoint) queue.push(sortEndpoint);
-      while ((pending || queue.length) && comments.length < limit && !cancelled) {
+      while ((pending || queue.length) && comments.length < limit && !stopped()) {
         const ep = pending ? null : queue.shift();
-        const resp = pending || (await WV.withBackoff(() => callNext(ep, cfg)));
+        const resp = pending || (await WV.withBackoff(() => callNext(ep, cfg), { stop: stopped }));
         pending = null;
         const r = WV.parseInnertubeComments(resp, doc.id, { includeReplies });
         if (r.error && !comments.length) throw new Error(r.error);
@@ -153,7 +156,7 @@
         progress(comments.length, total);
         await WV.sleep(120); // 서버 부담 줄이기
       }
-      if (queue.length || cancelled) complete = false;
+      if (queue.length || stopped()) complete = false;
     }
 
     let pool = null, limited = false;
@@ -163,7 +166,7 @@
       const page = async (ep, replies) => WV.parseInnertubeComments(await callNext(ep, cfg), doc.id, { includeReplies: replies || includeReplies });
       const r = await WV.sampleRandom({
         start: sortItems[1].serviceEndpoint, page, max, seed: doc.meta.videoId, includeReplies,
-        concurrency: 3, minGapMs: 100, isCancelled: () => cancelled,
+        concurrency: 3, minGapMs: 100, isCancelled: stopped,
         onProgress: (n, t, phase) => progress(n, t, phase),
       });
       comments.push(...r.comments);
@@ -176,13 +179,13 @@
       await drain(sortItems[0].serviceEndpoint, Math.ceil(max / 2));
       const topDone = complete;
       complete = true;
-      if (!topDone && !cancelled) await drain(sortItems[1].serviceEndpoint, max);
+      if (!topDone && !stopped()) await drain(sortItems[1].serviceEndpoint, max);
       else complete = topDone;
     } else {
       await drain(sortItems[sort === "new" ? 1 : 0]?.serviceEndpoint, max);
     }
     doc.meta.totalComments = total;
-    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled, complete, pool, limited };
+    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled: stopped(), complete, pool, limited };
     return { doc, comments };
   }
 
