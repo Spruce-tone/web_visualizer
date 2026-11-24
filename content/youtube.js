@@ -216,18 +216,28 @@
     setTimeout(() => (el.style.outlineColor = "transparent"), 3000);
   }
 
+  // 영상 아래 댓글 영역. 넓은 화면의 숨은 댓글 패널(engagement panel)과 섞이지 않게 id까지 맞춘다.
+  const COMMENTS = "ytd-comments#comments";
+  /** 실제로 보이는가: display:none·visibility:hidden·투명·크기 0을 모두 거른다 */
+  function isShown(el) {
+    if (!el.getClientRects().length) return false;
+    if (typeof el.checkVisibility === "function" && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+
   /** 화면에 보이고 lc 값이 정확히 일치하는 댓글 요소 (접두어만 같은 답글 링크에 속지 않게 값 비교) */
   function findCommentEl(id) {
-    for (const a of document.querySelectorAll(`ytd-comments a[href*="lc="]`)) {
+    for (const a of document.querySelectorAll(`${COMMENTS} a[href*="lc="]`)) {
       let lc = null;
       try { lc = new URL(a.getAttribute("href"), location.origin).searchParams.get("lc"); } catch { /* 무시 */ }
       // 숨은 댓글 패널(넓은 화면의 engagement panel)에도 같은 댓글이 있을 수 있다 → 화면에 보이는 것만
-      if (lc === id) { const el = a.closest(SEL.comment); if (el && el.getClientRects().length) return el; }
+      if (lc === id) { const el = a.closest(SEL.comment); if (el && isShown(el)) return el; }
     }
     return null;
   }
 
-  const topThreads = () => document.querySelectorAll("ytd-comments ytd-comment-thread-renderer").length;
+  const topThreads = () => document.querySelectorAll(`${COMMENTS} ytd-comment-thread-renderer`).length;
   const say = (text) => chrome.runtime.sendMessage({ type: "WV_FIND_PROGRESS", text }).catch(() => {});
 
   /**
@@ -246,13 +256,13 @@
       if (!restored && !ad && v && v.readyState >= 1 && t > 3 && v.currentTime < t - 2) {
         try { v.currentTime = t; if (paused) v.pause(); restored = true; } catch { /* 무시 */ }
       }
-      const section = document.querySelector("ytd-comments");
+      const section = document.querySelector(COMMENTS);
       const el = findCommentEl(id);
       if (el) {
         highlight(el);
         return { ok: true };
       }
-      if (section && !document.querySelector("ytd-comments ytd-comment-thread-renderer")) section.scrollIntoView({ block: "start" }); // 댓글은 화면 근처에 와야 불러온다
+      if (section && !document.querySelector(`${COMMENTS} ytd-comment-thread-renderer`)) section.scrollIntoView({ block: "start" }); // 댓글은 화면 근처에 와야 불러온다
       await WV.sleep(250);
     }
     return { ok: false, reason: findCancelled ? "찾기를 멈췄어요." : "댓글이 뜨지 않았어요. 삭제됐거나 숨겨진 댓글일 수 있어요." };
@@ -268,7 +278,7 @@
     let el = findCommentEl(id);
     if (el) { highlight(el); return { ok: true }; }
 
-    const section = document.querySelector("ytd-comments");
+    const section = document.querySelector(COMMENTS);
     if (!section) return { ok: false, reason: "이 페이지에서 댓글 영역을 찾지 못했어요." };
     section.scrollIntoView({ block: "start" });
     const deadline = Date.now() + timeoutMs;
@@ -322,7 +332,7 @@
   window.addEventListener("hashchange", devOpen);
   devOpen();
 
-  const BRIDGE_V = 2; // content/page-bridge.js 의 V와 같아야 한다
+  const BRIDGE_V = 2; // content/page-bridge.js 의 V와 같아야 한다 (tests/run.mjs가 검사)
   /** 페이지 쪽 다리(page-bridge.js)에 부탁하고 답을 기다린다. 다리가 없으면 "timeout". */
   function askBridge(name, payload, timeoutMs) {
     return new Promise((resolve) => {
@@ -357,7 +367,7 @@
     findCancelled = false;
     let el = findCommentEl(id);
     if (el) { highlight(el); return { ok: true, via: "화면에 있던 댓글" }; }
-    const section = document.querySelector("ytd-comments");
+    const section = document.querySelector(COMMENTS);
     if (!section) return { ok: false, reason: "이 페이지에서 댓글 영역을 찾지 못했어요." };
     section.scrollIntoView({ block: "start" }); // 댓글 영역이 화면에 와야 YouTube가 댓글과 정렬 버튼을 불러온다
     say("댓글 영역에서 그 댓글을 불러오는 중");

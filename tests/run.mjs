@@ -826,4 +826,12 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.ok(after.extra.flat().length < before.extra.flat().length, "합친 뒤 겹침이 줄어든다");
 }
 
+// 다리 판: content/youtube.js 의 BRIDGE_V 와 content/page-bridge.js 의 V 가 같아야 이벤트 이름이 맞는다
+{
+  const yv = fs.readFileSync(new URL("../content/youtube.js", import.meta.url), "utf8").match(/const BRIDGE_V = (\d+);/)?.[1];
+  const bv = fs.readFileSync(new URL("../content/page-bridge.js", import.meta.url), "utf8").match(/const V = (\d+);/)?.[1];
+  assert.ok(yv && bv, "다리 판 상수를 찾지 못함");
+  assert.equal(yv, bv, "youtube.js BRIDGE_V 와 page-bridge.js V 가 다름");
+}
+
 console.log("all tests passed");
