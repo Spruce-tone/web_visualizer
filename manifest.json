@@ -39,7 +39,6 @@
         "https://www.youtube.com/*"
       ],
       "js": [
-        "content/parse.js",
         "content/page-bridge.js"
       ],
       "run_at": "document_idle",

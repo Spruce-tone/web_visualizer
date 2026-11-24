@@ -18,8 +18,9 @@
   const ack = (name, detail) => document.dispatchEvent(new CustomEvent(name, { detail }));
   const waitFor = async (fn, ms) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v || Date.now() > end) return v; await new Promise((r) => setTimeout(r, 200)); } };
 
-  // 토큰 고르기는 content/parse.js(WV.findCommentToken, 테스트 있음). 메인 월드에도 parse.js를 먼저 넣는다(manifest·sidepanel.js).
-  const findCommentToken = window.WV?.findCommentToken;
+  // 토큰 고르기는 content/parse.js(WV.findCommentToken, 테스트 있음). 패널이 댓글을 열 때마다 parse.js를 메인 월드에 먼저 넣으므로
+  // 부를 때 찾는다. (manifest로는 넣을 수 없음: 같은 파일이 isolated 항목에도 있으면 메인 월드 쪽은 들어가지 않았다 — Edge 실측)
+  const findCommentToken = (j) => (typeof window.WV?.findCommentToken === "function" ? window.WV.findCommentToken(j) : undefined);
 
   document.addEventListener(`wv-show-comment-v${V}`, async (ev) => {
     let result = "error";
@@ -37,8 +38,9 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ context: cfg.get("INNERTUBE_CONTEXT"), videoId, params: linkedParams(id) }),
         });
-        const token = res.ok && findCommentToken ? findCommentToken(await res.json()) : null;
-        if (!token) result = "no-token";
+        const token = res.ok ? findCommentToken(await res.json()) : null;
+        if (token === undefined) result = "no-parse";
+        else if (!token) result = "no-token";
         else {
           const endpoint = JSON.parse(JSON.stringify(menu.data.subMenuItems[0].serviceEndpoint));
           endpoint.continuationCommand.token = token;
