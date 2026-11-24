@@ -70,9 +70,9 @@
 | 선택지 | 모델 | 특징 |
 |---|---|---|
 | 자동 (기본) | GPU 있음 → EmbeddingGemma, 없음 → Bekko | 기기에 맞게 고름 |
-| 가벼움 | Bekko a25m (MIT) | CPU에서 빠름, 약 190MB |
-| 균형 | EmbeddingGemma-300M | 정확도 높음, CPU에서도 동작 |
-| 고성능 | Qwen3-Embedding-0.6B | GPU 권장 |
+| 가벼움 | Bekko a25m (MIT) | CPU에서 빠름, 약 234MB |
+| 균형 | EmbeddingGemma-300M | 정확도 높음, CPU에서도 동작, 약 220MB |
+| 고성능 | Qwen3-Embedding-0.6B | GPU 권장, GPU 약 580MB · CPU 약 630MB |
 | 문구만 | 없음 | 즉시, 표현이 다른 같은 뜻은 못 묶음 |
 
 글꼴은 [Pretendard](https://github.com/orioncactus/pretendard) (SIL Open Font License 1.1)를 zip에 함께 넣습니다.
