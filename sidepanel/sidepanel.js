@@ -88,15 +88,24 @@ async function targetTab() {
   const tab = await currentTab();
   if (!tab) throw new Error("분석하던 YouTube 탭이 닫혔어요. 영상을 다시 열고 패널에서 시작하세요.");
   if (!videoIdOf(tab)) throw new Error("YouTube 영상 페이지에서 사용하세요.");
+  if (tab.discarded || tab.status === "unloaded") throw new Error(NOT_LOADED);
   return tab;
 }
+// 브라우저를 다시 켜 복원만 되고 아직 열리지 않은 탭(또는 메모리 절약으로 잠든 탭)에는 스크립트를 넣을 수 없다.
+// 브라우저의 영어 오류("Cannot access contents of the page…") 대신 할 일을 알려 준다.
+const NOT_LOADED = "영상 탭이 아직 열리지 않았어요. 영상 탭을 한 번 눌러 연 뒤 다시 시도해 주세요.";
+const isNotLoaded = (e) => /Cannot access contents|cannot be scripted|discarded|showing error page/i.test(String(e?.message || e));
 async function send(type, extra = {}) {
   const tab = await targetTab();
   try {
     return await chrome.tabs.sendMessage(tab.id, { type, ...extra });
   } catch {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content/parse.js", "content/youtube.js"] });
-    return await chrome.tabs.sendMessage(tab.id, { type, ...extra });
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content/parse.js", "content/youtube.js"] });
+      return await chrome.tabs.sendMessage(tab.id, { type, ...extra });
+    } catch (e) {
+      throw isNotLoaded(e) ? new Error(NOT_LOADED) : e;
+    }
   }
 }
 
