@@ -185,6 +185,9 @@ assert.equal(kw[2][0], "편집");
 const st = buildStemmer([["정책은", "정책을", "고양이", "고양이가"]]);
 assert.equal(st("정책은"), "정책");
 assert.equal(st("고양이"), "고양이");
+// 답글의 @아이디는 키워드가 되지 않는다 (작성자 이름 가림)
+const { tokenize } = await import("../lib/keywords.js");
+assert.deepEqual(tokenize("@한남m1s 그건 아니지 @kkh8030 맞아"), ["그건", "아니지", "맞아"]);
 
 const { thresholdPresets, thresholdForTopicCount } = await import("../lib/vec.js");
 const knb = topKNeighbors(hashEmbed(kt), 8);
@@ -478,12 +481,16 @@ for (let seed = 1; seed <= 40; seed++) {
   kk.forEach((ws) => { koTopics++; if (ws.some((w) => COMMON_RE.test(w))) koNoise++; });
 }
 assert.ok(koNoise / koTopics <= 0.05, `공통 푸념이 섞인 주제 ${koNoise}/${koTopics}`);
-// 주제 낱말이 아주 드문(8~10%) 경우: 근거가 약하면 이름을 비워 두되, 푸념을 이름으로 쓰지는 않는다
-for (let seed = 1; seed <= 20; seed++) {
-  const ko2 = koreanTopics({ seed, sizes: { 자유: 300, 가짜뉴스: 120 }, coreRate: { 자유: 0.08, 가짜뉴스: 0.1 } });
-  const kk2 = topicKeywords(ko2.groups, ko2.texts, { k: 4 });
-  ko2.names.forEach((name, i) => assert.ok(!kk2[i].length || kk2[i][0] === name, `seed ${seed}: 드문 주제 낱말 (${kk2[i]})`));
-}
+// 주제 낱말이 아주 드문(8~10%) 두 주제, 큰 주제가 댓글의 71%를 차지해도 비지 않는다 (초기하 보정)
+const ko2 = koreanTopics({ sizes: { 자유: 300, 가짜뉴스: 120 }, coreRate: { 자유: 0.08, 가짜뉴스: 0.1 } });
+const kk2 = topicKeywords(ko2.groups, ko2.texts, { k: 4 });
+assert.deepEqual(kk2.map((x) => x[0]), ["자유", "가짜뉴스"]);
+// 묶음에만 나오는 낱말 24번, 묶음 몫 71%: 보정 없이는 z≈1.7(탈락), 보정하면 ≈3.1
+const { zScore } = await import("../lib/keywords.js");
+assert.ok(zScore(24, 300, 24, 420) > 3, `${zScore(24, 300, 24, 420)}`);
+assert.ok(zScore(3, 3, 3, 6) >= 1.96, "작은 묶음에서도 그 묶음에만 나온 낱말은 통과");
+assert.ok(Math.abs(zScore(10, 100, 20, 200)) < 1e-9, "기대만큼이면 0");
+assert.equal(zScore(5, 10, 5, 10), Infinity, "묶음이 전부면 견줄 바깥이 없다");
 // 푸념이 한 주제에 몰려도(그 주제 푸념의 20%를 앞 다섯 개에서) 주제 낱말이 이름에 들어가고, 대개 첫 키워드다
 let skewFirst = 0;
 for (let seed = 1; seed <= 40; seed++) {
@@ -502,6 +509,12 @@ assert.ok(skewFirst >= 38, `몰린 푸념: 주제 낱말이 첫 키워드인 경
   const kf = topicKeywords([gA, gB], tx, { k: 4 });
   assert.ok(kf[0].includes("자유"), `${kf[0]}`);
   assert.deepEqual(kf[1], [], "푸념만 있는 주제는 키워드 없음");
+  // 작은 묶음(16개 이하)에도 같은 규칙: 푸념만 있으면 비어 있다
+  const gC = [];
+  for (let i = 0; i < 8; i++) { gC.push(tx.length); tx.push(filler[i % 4]); }
+  const kfs = topicKeywords([gA, gB, gC], tx, { k: 4 });
+  assert.deepEqual(kfs[2], [], `작은 푸념 묶음 (${kfs[2]})`);
+  assert.ok(kfs[0].includes("자유"));
   // 무작위로 섞은 경우에도 대부분 비어 있다 (통계 검사라 가끔 우연한 낱말이 통과함)
   let named = 0;
   for (let seed = 1; seed <= 40; seed++) {
@@ -510,8 +523,25 @@ assert.ok(skewFirst >= 38, `몰린 푸념: 주제 낱말이 첫 키워드인 경
   }
   assert.ok(named <= 12, `푸념만 있는 주제에 이름이 붙은 경우 ${named}/40`);
 }
+// 두 주제에 걸쳐 많이 쓰인 낱말(쏠림은 낮지만 각 주제에서 영상 전체의 2배 넘게 나옴)도 두 주제 모두의 키워드가 된다
+{
+  const tx = [], gs = [];
+  const other = ["오늘 날씨 이야기", "점심 메뉴 고민", "주말 계획 세우기", "운동 다녀옴", "책 읽는 중", "영화 보러 감", "커피 마시는 중", "산책 다녀옴"];
+  for (let t = 0; t < 6; t++) {
+    const g = [];
+    for (let i = 0; i < 100; i++) {
+      g.push(tx.length);
+      const shared = t < 2 ? i < 25 : i === 0; // 주제 0·1: 25%, 나머지: 1개씩
+      tx.push(`${shared ? "가짜뉴스 " : ""}${t === 0 ? "처벌" : t === 1 ? "검열" : ["날씨", "메뉴", "운동", "영화"][t - 2]} ${other[(i + t) % 8]}`);
+    }
+    gs.push(g);
+  }
+  const ks = topicKeywords(gs, tx, { k: 4 });
+  assert.ok(ks[0].includes("가짜뉴스") && ks[1].includes("가짜뉴스"), `두 주제에 걸친 낱말 (${ks[0]} / ${ks[1]})`);
+  assert.ok(!ks.slice(2).some((k) => k.includes("가짜뉴스")));
+}
 // 흔한 어미·복수 떼기: 말뭉치 안에 근거가 있을 때만
-const st2 = buildStemmer([["처벌해야", "처벌하는", "처벌이", "기자들이", "기자는", "하는"]]);
+const st2 = buildStemmer([["처벌해야", "처벌하는", "처벌이", "기자들이", "기자는", "기자를", "하는"]]);
 assert.equal(st2("처벌해야"), "처벌");
 assert.equal(st2("기자들이"), "기자");
 assert.equal(st2("하는"), "하는", "어간이 두 글자 미만이면 떼지 않는다");
@@ -522,6 +552,9 @@ const st4 = buildStemmer([["큰아들", "큰아들이", "외아들", "외아들�
 assert.equal(st4("큰아들"), "큰아들");
 assert.equal(st4("큰아들이"), "큰아들");
 assert.equal(st4("외아들은"), "외아들");
+const st6 = buildStemmer([["큰아들", "큰아들이", "큰아이"], ["고양이", "고양들"]]);
+assert.equal(st6("큰아들"), "큰아들", "검증 안 된 조사 떼기(큰아이 → 큰아)는 '들' 떼기 근거가 아니다");
+assert.equal(st6("고양들"), "고양들");
 const st5 = buildStemmer([["기자들이", "기자들"]]);
 assert.equal(st5("기자들이"), "기자들", "'기자'나 '기자+조사'가 따로 없으면 '들'을 떼지 않는다");
 
