@@ -4,3 +4,4 @@ vendor/
 dist/
 package-lock.json
 qa/
+fixtures/set/

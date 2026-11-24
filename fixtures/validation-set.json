@@ -1,0 +1,245 @@
+{
+ "about": "검증 세트 목록 (댓글 원문·작성자는 저장소에 없음, fixtures/set/ 에 로컬로만). 수집: 확장 collectAll, 고르게 무작위, 답글 포함, 최대 1,000개. 고른 기준은 fixtures/README.md",
+ "videos": [
+  {
+   "cat": "news",
+   "id": "5rG5nAmv7jo",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 116,
+   "totalOnVideo": 1368
+  },
+  {
+   "cat": "news",
+   "id": "HyFZhtwWsv0",
+   "collected": "2026-11-24",
+   "comments": 621,
+   "replies": 209,
+   "totalOnVideo": 623
+  },
+  {
+   "cat": "news",
+   "id": "LszYi_iNXY0",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 228,
+   "totalOnVideo": 1631
+  },
+  {
+   "cat": "news",
+   "id": "SYKAzk3tuf0",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 233,
+   "totalOnVideo": 2415
+  },
+  {
+   "cat": "news",
+   "id": "ZTTg9Cl3gU4",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 318,
+   "totalOnVideo": 3183
+  },
+  {
+   "cat": "politics-a",
+   "id": "12SFkIsJJM8",
+   "collected": "2026-11-24",
+   "comments": 400,
+   "replies": 27,
+   "totalOnVideo": 401
+  },
+  {
+   "cat": "politics-a",
+   "id": "mVAXac_dZ54",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 6,
+   "totalOnVideo": 3390
+  },
+  {
+   "cat": "politics-a",
+   "id": "nlaJtvb4-dw",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 229,
+   "totalOnVideo": 1468
+  },
+  {
+   "cat": "politics-a",
+   "id": "ojsYpuwiA8U",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 17,
+   "totalOnVideo": 1411
+  },
+  {
+   "cat": "politics-a",
+   "id": "zw0aM8qGseA",
+   "collected": "2026-11-24",
+   "comments": 361,
+   "replies": 57,
+   "totalOnVideo": 361
+  },
+  {
+   "cat": "politics-b",
+   "id": "1OFeDqEk4Kg",
+   "collected": "2026-11-24",
+   "comments": 912,
+   "replies": 38,
+   "totalOnVideo": 912
+  },
+  {
+   "cat": "politics-b",
+   "id": "85-1d1vnJ5A",
+   "collected": "2026-11-24",
+   "comments": 465,
+   "replies": 43,
+   "totalOnVideo": 465
+  },
+  {
+   "cat": "politics-b",
+   "id": "QPAW63M8_6k",
+   "collected": "2026-11-24",
+   "comments": 867,
+   "replies": 11,
+   "totalOnVideo": 867
+  },
+  {
+   "cat": "politics-b",
+   "id": "z7wnylVutzE",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 51,
+   "totalOnVideo": 1137
+  },
+  {
+   "cat": "politics-b",
+   "id": "_svtjC8sK0Q",
+   "collected": "2026-11-24",
+   "comments": 343,
+   "replies": 32,
+   "totalOnVideo": 343
+  },
+  {
+   "cat": "music",
+   "id": "0JQ9k6kcKVs",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 231,
+   "totalOnVideo": 19510
+  },
+  {
+   "cat": "music",
+   "id": "1D8Ckb23wvw",
+   "collected": "2026-11-24",
+   "comments": 572,
+   "replies": 28,
+   "totalOnVideo": 572
+  },
+  {
+   "cat": "music",
+   "id": "A_H1EH6p4A0",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 56,
+   "totalOnVideo": 6144
+  },
+  {
+   "cat": "music",
+   "id": "V2V9-9VhYJo",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 90,
+   "totalOnVideo": 30211
+  },
+  {
+   "cat": "music",
+   "id": "wG7pnZttup8",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 134,
+   "totalOnVideo": 18320
+  },
+  {
+   "cat": "game",
+   "id": "4DNh_idNJIM",
+   "collected": "2026-11-24",
+   "comments": 724,
+   "replies": 209,
+   "totalOnVideo": 771
+  },
+  {
+   "cat": "game",
+   "id": "Fx1MzhXjZT0",
+   "collected": "2026-11-24",
+   "comments": 494,
+   "replies": 174,
+   "totalOnVideo": 514
+  },
+  {
+   "cat": "game",
+   "id": "jyuHJ7WOqq0",
+   "collected": "2026-11-24",
+   "comments": 475,
+   "replies": 118,
+   "totalOnVideo": 485
+  },
+  {
+   "cat": "game",
+   "id": "P5d-ZLQevrE",
+   "collected": "2026-11-24",
+   "comments": 944,
+   "replies": 353,
+   "totalOnVideo": 982
+  },
+  {
+   "cat": "game",
+   "id": "qhldObL8zpY",
+   "collected": "2026-11-24",
+   "comments": 1000,
+   "replies": 347,
+   "totalOnVideo": 1925
+  },
+  {
+   "cat": "daily",
+   "id": "2v9i0n6PqyY",
+   "collected": "2026-11-24",
+   "comments": 590,
+   "replies": 35,
+   "totalOnVideo": 590
+  },
+  {
+   "cat": "daily",
+   "id": "68Et29gmrfA",
+   "collected": "2026-11-24",
+   "comments": 332,
+   "replies": 80,
+   "totalOnVideo": 335
+  },
+  {
+   "cat": "daily",
+   "id": "702V-JUBCy8",
+   "collected": "2026-11-24",
+   "comments": 536,
+   "replies": 255,
+   "totalOnVideo": 536
+  },
+  {
+   "cat": "daily",
+   "id": "7Hf-FdkKgJQ",
+   "collected": "2026-11-24",
+   "comments": 442,
+   "replies": 35,
+   "totalOnVideo": 442
+  },
+  {
+   "cat": "daily",
+   "id": "mCaDAOdkZFc",
+   "collected": "2026-11-24",
+   "comments": 464,
+   "replies": 51,
+   "totalOnVideo": 464
+  }
+ ]
+}
