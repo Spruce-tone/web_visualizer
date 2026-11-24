@@ -904,7 +904,7 @@ async function gotoComment() {
     finding = true;
     $("d-goto").textContent = "찾기 중지";
     // 확장을 설치·업데이트하기 전에 열린 탭에는 페이지 쪽 다리가 없다 → 매번 넣어 준다 (이미 있으면 아무 일도 안 함)
-    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["content/page-bridge.js"] }); } catch (e) { console.warn("[WV] bridge inject failed", e); }
+    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["content/parse.js", "content/page-bridge.js"] }); } catch (e) { console.warn("[WV] bridge inject failed", e); }
     $("d-status").textContent = "페이지에서 댓글을 여는 중";
     // content script가 차례로 시도한다: 화면에 있음 → 댓글 영역만 다시 불러오기 → YouTube 내부 이동
     let r = await send("WV_FOCUS", { id: c.id, parentId: c.parentId });

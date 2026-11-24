@@ -864,4 +864,19 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   globalThis.fetch = realFetch;
 }
 
+// 하이라이트 댓글 토큰 고르기 (page-bridge.js가 씀): 실제 /next 응답 모양(fixtures, 토큰 값만 바꿈)
+{
+  const { response } = JSON.parse(fs.readFileSync(new URL("../fixtures/youtube-next-linked-comment.json", import.meta.url), "utf8"));
+  assert.equal(WV.findCommentToken(response), "comments-section-120", "영상 아래 댓글(comments-section) 토큰을 고른다");
+  // 키 순서가 바뀌어도(숨은 패널이 먼저 나와도) 같은 결과
+  assert.equal(WV.findCommentToken({ engagementPanels: response.engagementPanels, contents: response.contents }), "comments-section-120");
+  // 영상 아래 댓글 구역이 없으면 숨은 댓글 패널 토큰으로 대신한다 (관련 영상·정렬 메뉴 토큰은 고르지 않음)
+  const noMain = structuredClone(response);
+  noMain.contents.twoColumnWatchNextResults.results.results.contents = [];
+  assert.equal(WV.findCommentToken(noMain), "engagement-panel-comments-section-142");
+  noMain.engagementPanels = [];
+  assert.equal(WV.findCommentToken(noMain), null, "댓글 구역이 없으면 null");
+  assert.equal(WV.findCommentToken(null), null);
+}
+
 console.log("all tests passed");

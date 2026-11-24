@@ -164,5 +164,35 @@ WV.parseWatchMeta = function (html) {
   return { title: meta("title"), channel: ch ? unesc(ch[1]) : null, description: description ?? meta("description") };
 };
 
+/**
+ * /youtubei/v1/next 응답에서 댓글 목록 이어보기 토큰을 고른다 (page-bridge.js가 메인 월드에서 쓴다).
+ * 응답에는 토큰이 둘 있다: 영상 아래 댓글(itemSectionRenderer.targetId "comments-section", 하이라이트할 댓글 id가 들어 있음)과
+ * 넓은 화면에서 숨어 있는 댓글 패널(engagement-panel-comments-section 안의 sectionIdentifier "comment-item-section").
+ * 숨은 패널 토큰을 쓰면 결과가 안 보이는 곳에 그려지므로 앞의 것을 우선하고, 없을 때만 뒤의 것을 쓴다.
+ */
+WV.findCommentToken = function (obj) {
+  const found = [];
+  const stack = [obj];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (Array.isArray(cur)) { for (const x of cur) stack.push(x); continue; }
+    if (!cur || typeof cur !== "object") continue;
+    const sec = cur.itemSectionRenderer;
+    if (sec && (sec.sectionIdentifier === "comment-item-section" || sec.targetId === "comments-section")) {
+      const inner = [sec];
+      while (inner.length) {
+        const c = inner.pop();
+        if (Array.isArray(c)) { for (const x of c) inner.push(x); continue; }
+        if (!c || typeof c !== "object") continue;
+        const t = c.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token;
+        if (t) { found.push({ t, main: sec.targetId === "comments-section" }); break; }
+        for (const v of Object.values(c)) inner.push(v);
+      }
+    }
+    for (const v of Object.values(cur)) stack.push(v);
+  }
+  return (found.find((f) => f.main) || found[0])?.t || null;
+};
+
 WV.text = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
 WV.sleep = (ms) => new Promise((r) => setTimeout(r, ms));

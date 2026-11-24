@@ -18,31 +18,8 @@
   const ack = (name, detail) => document.dispatchEvent(new CustomEvent(name, { detail }));
   const waitFor = async (fn, ms) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v || Date.now() > end) return v; await new Promise((r) => setTimeout(r, 200)); } };
 
-  // 응답에는 댓글 목록 토큰이 둘 있다: 영상 아래 댓글(targetId "comments-section", 그 댓글 id가 들어 있음)과
-  // 넓은 화면에서는 숨어 있는 댓글 패널("engagement-panel-comments-section"). 숨은 패널 토큰을 쓰면 결과가 안 보이는 곳에 그려진다.
-  function findCommentToken(obj) {
-    const found = [];
-    const stack = [obj];
-    while (stack.length) {
-      const cur = stack.pop();
-      if (Array.isArray(cur)) { for (const x of cur) stack.push(x); continue; }
-      if (!cur || typeof cur !== "object") continue;
-      const sec = cur.itemSectionRenderer;
-      if (sec && (sec.sectionIdentifier === "comment-item-section" || sec.targetId === "comments-section")) {
-        const inner = [sec];
-        while (inner.length) {
-          const c = inner.pop();
-          if (Array.isArray(c)) { for (const x of c) inner.push(x); continue; }
-          if (!c || typeof c !== "object") continue;
-          const t = c.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token;
-          if (t) { found.push({ t, main: sec.targetId === "comments-section" }); break; }
-          for (const v of Object.values(c)) inner.push(v);
-        }
-      }
-      for (const v of Object.values(cur)) stack.push(v);
-    }
-    return (found.find((f) => f.main) || found[0])?.t || null;
-  }
+  // 토큰 고르기는 content/parse.js(WV.findCommentToken, 테스트 있음). 메인 월드에도 parse.js를 먼저 넣는다(manifest·sidepanel.js).
+  const findCommentToken = window.WV?.findCommentToken;
 
   document.addEventListener(`wv-show-comment-v${V}`, async (ev) => {
     let result = "error";
@@ -60,7 +37,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ context: cfg.get("INNERTUBE_CONTEXT"), videoId, params: linkedParams(id) }),
         });
-        const token = res.ok ? findCommentToken(await res.json()) : null;
+        const token = res.ok && findCommentToken ? findCommentToken(await res.json()) : null;
         if (!token) result = "no-token";
         else {
           const endpoint = JSON.parse(JSON.stringify(menu.data.subMenuItems[0].serviceEndpoint));

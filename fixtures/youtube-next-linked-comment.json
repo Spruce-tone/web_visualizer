@@ -1,0 +1,118 @@
+{
+ "note": "실제 /youtubei/v1/next 응답(하이라이트 댓글 요청, 2026-11-26)에서 이어보기 토큰까지의 경로만 남긴 것. 토큰 값은 <구역>-<원래 길이>로 바꿈.",
+ "response": {
+  "contents": {
+   "twoColumnWatchNextResults": {
+    "results": {
+     "results": {
+      "contents": [
+       {
+        "itemSectionRenderer": {
+         "contents": [
+          {
+           "continuationItemRenderer": {
+            "continuationEndpoint": {
+             "continuationCommand": {
+              "token": "comments-section-120"
+             }
+            }
+           }
+          }
+         ],
+         "sectionIdentifier": "comment-item-section",
+         "targetId": "comments-section"
+        }
+       }
+      ]
+     }
+    },
+    "secondaryResults": {
+     "secondaryResults": {
+      "results": [
+       {
+        "itemSectionRenderer": {
+         "contents": [
+          {
+           "continuationItemRenderer": {
+            "continuationEndpoint": {
+             "continuationCommand": {
+              "token": "watch-next-feed-2412"
+             }
+            },
+            "button": {
+             "buttonRenderer": {
+              "command": {
+               "continuationCommand": {
+                "token": "watch-next-feed-2412"
+               }
+              }
+             }
+            }
+           }
+          }
+         ],
+         "sectionIdentifier": "sid-wn-chips",
+         "targetId": "watch-next-feed"
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  "engagementPanels": [
+   {
+    "engagementPanelSectionListRenderer": {
+     "header": {
+      "engagementPanelTitleHeaderRenderer": {
+       "menu": {
+        "sortFilterSubMenuRenderer": {
+         "subMenuItems": [
+          {
+           "serviceEndpoint": {
+            "continuationCommand": {
+             "token": "sort-menu-100"
+            }
+           }
+          },
+          {
+           "serviceEndpoint": {
+            "continuationCommand": {
+             "token": "sort-menu-100"
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "content": {
+      "sectionListRenderer": {
+       "contents": [
+        {
+         "itemSectionRenderer": {
+          "contents": [
+           {
+            "continuationItemRenderer": {
+             "continuationEndpoint": {
+              "continuationCommand": {
+               "token": "engagement-panel-comments-section-142"
+              }
+             }
+            }
+           }
+          ],
+          "sectionIdentifier": "comment-item-section",
+          "targetId": "engagement-panel-comments-section"
+         }
+        }
+       ]
+      }
+     },
+     "targetId": "engagement-panel-comments-section"
+    }
+   }
+  ]
+ }
+}
