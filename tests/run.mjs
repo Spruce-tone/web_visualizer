@@ -683,6 +683,17 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   }
 }
 {
+  // 선 줄이기: 두 촘촘한 무리(각 5점 완전 그래프, 선 강도 0.9)를 잇는 약한 다리(0.1)는 점마다 3개 기준이면 버려진다 → 다시 잇는다
+  const { thinEdges } = await import("../lib/layout.js");
+  const es = [];
+  for (const base of [0, 5]) for (let i = 0; i < 5; i++) for (let j = i + 1; j < 5; j++) es.push({ a: base + i, b: base + j, w: 0.9 });
+  es.push({ a: 4, b: 5, w: 0.1 }, { a: 3, b: 6, w: 0.05 });
+  const kept = thinEdges(es, 3);
+  assert.ok(kept.some((e) => e.a === 4 && e.b === 5), "끊긴 무리를 가장 강한 다리로 다시 잇는다");
+  assert.ok(!kept.some((e) => e.a === 3 && e.b === 6), "다리는 하나만 더한다");
+  assert.ok(kept.length < es.length, "줄이기는 그대로 한다");
+}
+{
   // 서로만 닿은 주제 무리(A–B, C–D, 무리 사이 선 0)를 멀리 떨어뜨려 시작해도 하나로 모인다 (주제별 틈 기준으로는 못 잡는 경우)
   let sd = 5; const r = () => ((sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648);
   const pair = [0, 0, 1, 1];

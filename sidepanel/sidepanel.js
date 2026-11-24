@@ -9,7 +9,7 @@ import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighb
 import { kmeans, isShortReaction } from "../lib/cluster.js";
 import { fuzzyGraph, umapLayout, toPixels } from "../lib/umap.js";
 import { louvain, snnGraph, overlapTopics, mergeSameKeywordTopics } from "../lib/community.js";
-import { createLayout } from "../lib/layout.js";
+import { createLayout, thinEdges } from "../lib/layout.js";
 import { timeHistogram } from "../lib/analyze.js";
 import { clusterSignals } from "../lib/signals.js";
 import { DEFAULT_WEIGHTS, loadCalibrated } from "../lib/weights.js";
@@ -387,14 +387,8 @@ function drawMap({ fresh = false } = {}) {
   } else {
     const { comments, doc } = S;
     const ids = V.topic.ids;
-    // 선: 점마다 가장 강하게 이어진 이웃 3개 (옵시디언처럼 이어진 그래프, 너무 빽빽하지 않게)
-    const per = new Map();
-    for (const e of S.graphEdges) {
-      for (const [p, q] of [[e.a, e.b], [e.b, e.a]]) { if (!per.has(p)) per.set(p, []); per.get(p).push({ q, w: e.w }); }
-    }
-    const keepE = new Set();
-    for (const [p, list] of per) { list.sort((u, v) => v.w - u.w); for (const { q } of list.slice(0, 3)) keepE.add(p < q ? `${p}|${q}` : `${q}|${p}`); }
-    const gEdges = S.graphEdges.filter((e) => e.a !== 0 && e.b !== 0 && keepE.has(`${e.a}|${e.b}`)).map((e) => ({ a: e.a, b: e.b, sim: 0.45 + 0.55 * e.w }));
+    // 선: 점마다 가장 강하게 이어진 이웃 3개 (옵시디언처럼 이어진 그래프, 너무 빽빽하지 않게). 줄이다 끊긴 곳은 다시 잇는다.
+    const gEdges = thinEdges(S.graphEdges.filter((e) => e.a !== 0 && e.b !== 0), 3).map((e) => ({ a: e.a, b: e.b, sim: 0.45 + 0.55 * e.w }));
     const maxLikes = Math.max(1, ...comments.map((c) => c.likes || 0));
     const byTone = $("color-by").value === "tone";
     const nodes = [
