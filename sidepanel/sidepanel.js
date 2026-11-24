@@ -160,6 +160,7 @@ async function run(type, extra) {
     const notes = [];
     if (res.fallback) notes.push(`전체 수집이 안 돼서 화면에 보이는 댓글만 분석했어요 (${res.fallback})`);
     if (doc.meta.collection?.cancelled) notes.push("중지해서 모은 만큼만 분석했어요");
+    if (doc.meta.collection?.limited) notes.push("YouTube가 요청을 계속 받지 않아서(요청 제한이나 서버 오류) 중간에 멈추고, 모은 만큼만 분석했어요. 잠시 뒤 다시 모으면 더 받을 수 있어요");
 
     const n = comments.length;
     const docText = `${doc.title}\n${doc.text}`.slice(0, 1500);

@@ -523,12 +523,37 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
   await assert.rejects(run({}, fakeYT({ fail: () => ({ status: 500 }), delay: false })));
   const partial = await run({}, fakeYT({ fail: (ep) => ("p" in ep && ep.p >= 10 ? { status: 500 } : null), delay: false }));
   assert.equal(partial.pool.size, 200); assert.equal(partial.pool.complete, false); assert.equal(partial.complete, false);
-  // 한 스레드의 답글이 끝내 실패하면 그 답글만 빠지고 나머지는 그대로
+  // 한 스레드의 답글이 다시 시도할 수 없는 오류(403)로 실패하면 그 답글만 빠지고 나머지는 그대로
   const ft = small.comments.find((c) => c.parentId).parentId; // 뽑힌 스레드 하나
-  const rf = await run({}, fakeYT({ tops: 400, fail: (ep) => (`t${ep.t}` === ft ? { status: 500 } : null), delay: false }));
+  const rf = await run({}, fakeYT({ tops: 400, fail: (ep) => (`t${ep.t}` === ft ? { status: 403 } : null), delay: false }));
   assert.ok(!rf.comments.some((c) => c.parentId === ft) && rf.comments.some((c) => c.id === ft), "원댓글은 남고 답글만 빠짐");
   assert.ok(rf.comments.some((c) => c.parentId && c.parentId !== ft), "다른 스레드 답글은 그대로");
   assert.equal(rf.complete, false);
+  // 회로 차단: 어느 순간부터 답글 요청이 계속 429면, 한 스레드에서 4번 시도한 뒤 남은 답글 받기를 모두 멈춘다(다음 스레드에서 또 두드리지 않음)
+  {
+    let hits = 0;
+    const hitThreads = new Set();
+    const yl = fakeYT({ fail: (ep, st) => ("t" in ep && st.replyCalls > 5 ? (hits++, hitThreads.add(`t${ep.t}`), { status: 429 }) : null) });
+    const lw = [];
+    const rl = await run({ sleep: async (ms) => { lw.push(ms); } }, yl);
+    assert.equal(rl.limited, true); assert.equal(rl.complete, false);
+    assert.ok(hits <= 4 + 2, `막힌 뒤 보낸 답글 요청 ${hits}개 (한 스레드 4번 + 이미 나간 것)`);
+    assert.ok(rl.comments.length < 300, "그때까지 담은 것으로 끝냄");
+    // 섞은 순서는 후보 수와 씨앗으로만 정해진다 → 막힌 스레드의 위치 뒤 원댓글은 담기지 않아야 한다
+    const perm = WV.seededShuffle(Array.from({ length: 900 }, (_, i) => `t${i}`), "VID");
+    const lastHit = Math.max(...[...hitThreads].map((t) => perm.indexOf(t)));
+    assert.ok(rl.comments.filter((c) => !c.parentId).length <= lastHit + 1, "막힌 뒤 원댓글을 더 붙이지 않음");
+    // 중지는 막힘이 아니다
+    let stopRun = false;
+    const rc = await run({ isCancelled: () => stopRun, onProgress: (n, t, ph) => { if (ph === "답글 받는 중" && n > 100) stopRun = true; } });
+    assert.equal(rc.limited, false); assert.equal(rc.complete, false);
+    // 403 같은 실패는 그 스레드만 빼고 계속 (limited 아님) — 위 rf 경우
+    assert.equal(rf.limited, false);
+    // 중지되면 물러나 쉬던 요청도 깨어나서 다시 보내지 않는다
+    let stopNow = false, sent = 0;
+    await assert.rejects(WV.withBackoff(async () => { sent++; throw Object.assign(new Error("x"), { status: 429 }); }, { sleep: async () => { stopNow = true; }, stop: () => stopNow }));
+    assert.equal(sent, 1, "쉬는 동안 중지 → 다시 보내지 않음");
+  }
   // 요청 시작 간격: minGapMs를 지킨다
   const starts = [];
   const yg = fakeYT({ tops: 200 });

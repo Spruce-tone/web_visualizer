@@ -146,16 +146,18 @@ WV.retryable = (e) => !e?.status || e.status === 429 || e.status >= 500;
 
 /**
  * 실패하면 물러났다가(0.8초, 1.6초, 3.2초) 다시 시도한다. 다시 시도할 수 없는 실패(예: 403)는 바로 던진다.
+ * stop()이 참이면(중지, 다른 요청이 끝내 막힘) 다시 시도하지 않고 던진다 — 쉬는 동안 참이 되어도 깨어나서 보내지 않는다.
  * @param {() => Promise<any>} fn
- * @param {{tries?: number, baseMs?: number, sleep?: (ms:number)=>Promise<void>, onRetry?: (e:any)=>void}} [o]
+ * @param {{tries?: number, baseMs?: number, sleep?: (ms:number)=>Promise<void>, onRetry?: (e:any)=>void, stop?: () => boolean}} [o]
  */
-WV.withBackoff = async function (fn, { tries = 4, baseMs = 800, sleep = WV.sleep, onRetry } = {}) {
+WV.withBackoff = async function (fn, { tries = 4, baseMs = 800, sleep = WV.sleep, onRetry, stop = () => false } = {}) {
   for (let i = 0; ; i++) {
     try { return await fn(); }
     catch (e) {
-      if (i >= tries - 1 || !WV.retryable(e)) throw e;
+      if (i >= tries - 1 || !WV.retryable(e) || stop()) throw e;
       onRetry?.(e);
       await sleep(baseMs * 2 ** i);
+      if (stop()) throw e;
     }
   }
 };
@@ -166,6 +168,7 @@ WV.withBackoff = async function (fn, { tries = 4, baseMs = 800, sleep = WV.sleep
  * 2) 씨앗이 정해진 섞기로 후보 순서를 정하고, 그 순서대로 원댓글과 답글을 max개까지 담는다.
  *    답글은 스레드마다 따로 받으므로 동시에 concurrency개까지 받는다. 담는 순서는 섞은 순서 그대로라 결과는 동시 요청과 상관없이 같다.
  * - 서버 부담: 모든 요청의 시작 간격을 minGapMs 이상으로 둔다. 다시 시도할 실패(429·5xx)가 한 번이라도 나면 동시 요청을 1개로 줄이고 물러난다.
+ *   물러났다 다시 해도 끝내 막히면(limited) 남은 요청을 모두 멈추고 그때까지 담은 것으로 끝낸다(다음 스레드에서 또 두드리지 않게).
  * @param {object} o
  * @param {any} o.start 최신순 정렬의 첫 endpoint
  * @param {(endpoint:any, replies:boolean) => Promise<{comments:any[], next:any[], replies:any[], threads:{id:string,endpoints:any[]}[], total:number|null, error:string|null}>} o.page
@@ -188,8 +191,16 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
     if (w > 0) await sleep(w);
     last = Date.now();
   }));
-  const call = (ep, replies) => WV.withBackoff(async () => { await spaced(); return page(ep, replies); },
-    { ...backoff, sleep, onRetry: () => { lanes = 1; } });
+  // 막힘 판단은 모든 요청이 함께 센다: 성공 없이 다시 시도할 실패가 tries번 이어지면 limited → 더 보내지 않는다
+  // (동시에 나간 요청들이 저마다 4번씩 두드리지 않게. 막힌 뒤 나가는 요청은 이미 나가 있던 lanes-1개뿐)
+  const tries = backoff.tries ?? 4;
+  let limited = false, strikes = 0;
+  const call = (ep, replies) => WV.withBackoff(async () => {
+    await spaced();
+    if (limited || isCancelled()) throw Object.assign(new Error("멈춤"), { status: 0, stopped: true });
+    try { const r = await page(ep, replies); strikes = 0; return r; }
+    catch (e) { if (WV.retryable(e) && ++strikes >= tries) limited = true; throw e; }
+  }, { ...backoff, sleep, onRetry: () => { lanes = 1; }, stop: () => limited || isCancelled() });
 
   const limit = WV.poolLimit(max);
   const cand = [], seenTop = new Set(), threadEps = new Map();
@@ -198,7 +209,7 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
   while (queue.length && cand.length < limit && !isCancelled()) {
     let r;
     try { r = await call(queue.shift(), false); }
-    catch (e) { if (!cand.length) throw e; scanOk = false; break; } // 후보가 있으면 거기까지로 뽑는다
+    catch (e) { if (!cand.length && !e.stopped) throw e; scanOk = false; break; } // 후보가 있으면 거기까지로 뽑는다(막힘이면 call이 limited를 켰다)
     if (r.error && !cand.length) throw new Error(r.error);
     if (r.total) total = r.total;
     for (const c of r.comments) if (!c.parentId && !seenTop.has(c.id)) { seenTop.add(c.id); cand.push(c); }
@@ -215,12 +226,14 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
   const fetchThread = async (eps, budget) => {
     const rq = [...eps], out = [];
     try {
-      while (rq.length && out.length < budget && !filled && !isCancelled()) {
+      while (rq.length && out.length < budget && !filled && !limited && !isCancelled()) {
         const r = await call(rq.shift(), true);
         for (const c of r.comments) if (c.parentId) out.push(c);
         rq.push(...r.replies);
       }
-    } catch { repliesOk = false; } // 이 스레드의 답글만 빠진다
+    } catch {
+      repliesOk = false; // 403 같은 실패면 이 스레드의 답글만 빠진다. 막힘(limited)은 call이 켜고, 그러면 아래에서 모두 멈춘다
+    }
     return out;
   };
   const jobs = new Map(); // 섞은 순서 위치 → 답글 Promise
@@ -234,7 +247,7 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
       ahead++;
     }
   };
-  for (let k = 0; k < order.length && comments.length < max && !isCancelled(); k++) {
+  for (let k = 0; k < order.length && comments.length < max && !limited && !isCancelled(); k++) {
     launch(k);
     const top = order[k];
     if (!seen.has(top.id)) { seen.add(top.id); comments.push(top); }
@@ -246,7 +259,8 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
     }
   }
   filled = true; // 다 담았으면 미리 받던 답글 사슬은 지금 요청까지만
-  return { comments, total, pool, complete: pool.complete && repliesOk && !isCancelled() };
+  // limited면 막힌 스레드(받은 답글까지)에서 멈추고 그 뒤 원댓글은 담지 않는다 — 답글 없는 원댓글만 이어 붙여 답글 비율이 틀어지지 않게
+  return { comments, total, pool, limited, complete: pool.complete && repliesOk && !limited && !isCancelled() };
 };
 
 /** YouTube가 '하이라이트 댓글'로 이동할 때 쓰는 params: protobuf { 15: 댓글 id, 36: { 24: 0 } } 를 base64 → URL 인코딩 (실제 페이지 값과 일치 확인) */
