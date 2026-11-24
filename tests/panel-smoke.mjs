@@ -130,8 +130,37 @@ assert.equal(V.commentLayout.x[1], mx + 40);
   st = api.state();
   assert.equal(st.listSrc, "sel");
   assert.deepEqual(st.listRows.slice().sort((a, b) => a - b), [0, 1, 2], "지도에서 고른 댓글이 목록이 된다");
+  api.pickFromList(1);
+  assert.equal(api.state().listSrc, "sel", "고른 댓글 목록에서 줄을 눌러도 목록·지도 선택이 그대로");
+  api.listFromSelection([3]);
+  st = api.state();
+  assert.equal(st.listSrc, "t" + st.V.topic.ids[2], "선택이 1개로 줄면 그 댓글의 주제 목록으로");
+  api.listFromSelection([1, 2, 3]);
   api.listFromSelection([]);
   assert.notEqual(api.state().listSrc, "sel", "고른 것을 풀면 주제 목록으로 돌아간다");
+  // 지도 필터를 목록도 따른다
+  const big = st.V.topics.find((t) => t.members.some((i) => comments[i].parentId) && t.members.some((i) => !comments[i].parentId)) || st.V.topics[0];
+  api.setList("t" + big.cluster);
+  byId("filter").value = "reply";
+  await byId("filter").onchange();
+  assert.ok(api.state().listRows.every((i) => comments[i].parentId), "답글만 보기면 목록도 답글만");
+  byId("filter").value = "top";
+  await byId("filter").onchange();
+  assert.ok(api.state().listRows.every((i) => !comments[i].parentId), "댓글만 보기면 목록도 원댓글만");
+  byId("filter").value = "all";
+  await byId("filter").onchange();
+  // 최근 순
+  byId("clist-sort").value = "new";
+  api.setList("t" + big.cluster);
+  const rr = api.state().listRows;
+  assert.ok(rr.every((i, k) => k === 0 || String(comments[rr[k - 1]].createdAtApprox) >= String(comments[i].createdAtApprox)), "최근 순 정렬");
+  byId("clist-sort").value = "likes";
+  // 보이는 줄만 그린다: 목록 높이 360px / 줄 68px → 앞뒤 여유 포함 많아야 14줄
+  const pad = byId("clist-pad");
+  let drawn = 0;
+  pad.replaceChildren = (...kids) => { drawn = kids.length; };
+  api.setList("t" + st.V.topics[0].cluster);
+  assert.ok(drawn > 0 && drawn <= 14 && drawn <= api.state().listRows.length, `보이는 줄만 그림 (${drawn}줄)`);
 }
 
 // 3) 상세 카드, 답글, 색 기준 전환
@@ -146,6 +175,7 @@ api.drawMap();
 // 4) 작성자 지도 왕복, 이름 가리기 끄기
 api.setMapMode("authors");
 assert.equal(api.state().shown, "authors");
+assert.equal(byId("clist").hidden, true, "작성자 지도에서는 댓글 목록을 숨김");
 api.showAuthor(0);
 api.rebuild();
 api.setMapMode("comments");

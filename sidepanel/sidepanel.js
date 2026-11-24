@@ -439,6 +439,7 @@ function drawMap({ fresh = false } = {}) {
     graph.setTagCount(tagDefs.length);
     graph.set({ layout, edges: gEdges, nodes, focus: null, labels, replyEdges, alwaysEdges: true, noGlow: true }, { keepView: !fresh && shown === "comments" && hadLayout, tags: savedTags });
     shown = "comments";
+    renderRows(); // 작성자 지도에 갔다 오면(목록이 숨어 있던 동안) 빈 칸으로 남지 않게
   }
   focusKey = null;
   renderLegend();
@@ -606,7 +607,8 @@ function setList(src, { keepScroll = false } = {}) {
   $("clist-topic").value = src || "";
   const { comments } = S;
   const base = src === "sel" ? listSel : src ? topicMembers(Number(src.slice(1))) : [];
-  const rows = [...base];
+  const f = $("filter").value; // 지도에서 숨긴 점은 목록에도 넣지 않는다
+  const rows = f === "top" ? base.filter((i) => !S.comments[i].parentId) : f === "reply" ? base.filter((i) => S.comments[i].parentId) : [...base];
   if ($("clist-sort").value === "new") rows.sort((a, b) => String(comments[b].createdAtApprox || "").localeCompare(String(comments[a].createdAtApprox || "")) || a - b);
   else rows.sort((a, b) => (comments[b].likes || 0) - (comments[a].likes || 0) || a - b);
   listRows = rows;
@@ -671,7 +673,8 @@ function pickFromList(i) {
   listActive = i;
   if (mapMode !== "comments") setMapMode("comments");
   graph.centerOn(i + 1);
-  graph.select([i + 1]);
+  // '지도에서 고른 댓글' 목록에서는 지도 선택을 그대로 둔다 (선택 = 목록). 주제 목록에서는 그 점 하나만 고른다.
+  if (listSrc !== "sel") graph.select([i + 1]);
   showDetail(i);
   renderRows();
 }
@@ -682,10 +685,10 @@ function listFromSelection(sel) {
     listSel = sel.filter((n) => n > 0).map((n) => n - 1);
     renderListOptions();
     setList("sel");
-  } else if (sel.length === 0 && listSel.length) {
+  } else if (listSel.length) { // 선택이 1개 이하로 줄면 '고른 댓글' 목록을 거두고 주제 목록으로
     listSel = [];
     renderListOptions();
-    if (listSrc === "sel") setList(null);
+    if (listSrc === "sel") setList(sel.length === 1 && sel[0] > 0 ? "t" + V.topic.ids[sel[0] - 1] : null);
   }
 }
 
@@ -1026,7 +1029,7 @@ $("res-range").onchange = () => rebuild();
 setSlider("th-lex", 0.6);
 $("k-minus").onclick = () => stepTopics(-1);
 $("k-plus").onclick = () => stepTopics(+1);
-$("filter").onchange = () => graph.setFilter($("filter").value);
+$("filter").onchange = () => { graph.setFilter($("filter").value); if (S && V && shown === "comments") setList(listSrc); };
 $("links-on").onchange = () => graph.toggleReplyLinks($("links-on").checked);
 $("labels-on").onchange = () => graph.toggleLabels($("labels-on").checked);
 $("btn-fit").onclick = () => graph.fit();
