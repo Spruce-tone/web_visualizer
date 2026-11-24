@@ -219,6 +219,9 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
   }
   const pool = { size: cand.length, limit, complete: scanOk && !queue.length && !isCancelled() };
 
+  // 후보를 훑다 막혔으면(limited) 더 요청하지 않고 모은 후보 안에서 원댓글만 담는다(답글 없이). 답글을 받다 막히면 그 자리에서 멈춘다.
+  const scanLimited = limited;
+  const withReplies = includeReplies && !scanLimited;
   const order = WV.seededShuffle(cand, seed);
   const comments = [], seen = new Set();
   let repliesOk = true, filled = false;
@@ -242,12 +245,12 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
     // 앞으로 담을 스레드의 답글을 미리 받는다. 담기 전 것만 lanes개까지 → 끝에서 버리는 요청은 lanes-1개 이하
     ahead = Math.max(ahead, k);
     while (jobs.size < lanes && ahead < order.length) {
-      const eps = includeReplies ? threadEps.get(order[ahead].id) : null;
+      const eps = withReplies ? threadEps.get(order[ahead].id) : null;
       if (eps) jobs.set(ahead, fetchThread(eps, max - comments.length));
       ahead++;
     }
   };
-  for (let k = 0; k < order.length && comments.length < max && !limited && !isCancelled(); k++) {
+  for (let k = 0; k < order.length && comments.length < max && !(limited && !scanLimited) && !isCancelled(); k++) {
     launch(k);
     const top = order[k];
     if (!seen.has(top.id)) { seen.add(top.id); comments.push(top); }
@@ -259,7 +262,7 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
     }
   }
   filled = true; // 다 담았으면 미리 받던 답글 사슬은 지금 요청까지만
-  // limited면 막힌 스레드(받은 답글까지)에서 멈추고 그 뒤 원댓글은 담지 않는다 — 답글 없는 원댓글만 이어 붙여 답글 비율이 틀어지지 않게
+  // 답글을 받다 limited가 되면 막힌 스레드(받은 답글까지)에서 멈추고 그 뒤 원댓글은 담지 않는다 — 답글 없는 원댓글만 이어 붙여 답글 비율이 틀어지지 않게
   return { comments, total, pool, limited, complete: pool.complete && repliesOk && !limited && !isCancelled() };
 };
 

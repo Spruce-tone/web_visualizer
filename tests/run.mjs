@@ -523,6 +523,14 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
   await assert.rejects(run({}, fakeYT({ fail: () => ({ status: 500 }), delay: false })));
   const partial = await run({}, fakeYT({ fail: (ep) => ("p" in ep && ep.p >= 10 ? { status: 500 } : null), delay: false }));
   assert.equal(partial.pool.size, 200); assert.equal(partial.pool.complete, false); assert.equal(partial.complete, false);
+  // 후보를 훑다 막힌 경우(10번째 쪽부터 계속 500): 더 요청하지 않고 모은 후보 200개 안에서 원댓글만 담는다
+  assert.equal(partial.limited, true);
+  assert.equal(partial.comments.length, 200, `후보 안에서 원댓글을 담음 (${partial.comments.length}개)`);
+  assert.ok(partial.comments.every((c) => !c.parentId), "막힌 뒤에는 답글을 받지 않음");
+  const y429 = fakeYT({ fail: (ep) => ("p" in ep && ep.p >= 10 ? { status: 429 } : null), delay: false });
+  const p429 = await run({}, y429);
+  assert.equal(p429.comments.length, 200); assert.equal(p429.limited, true);
+  assert.equal(y429.st.replyCalls, 0, "후보 단계에서 막히면 답글 요청 0개");
   // 한 스레드의 답글이 다시 시도할 수 없는 오류(403)로 실패하면 그 답글만 빠지고 나머지는 그대로
   const ft = small.comments.find((c) => c.parentId).parentId; // 뽑힌 스레드 하나
   const rf = await run({}, fakeYT({ tops: 400, fail: (ep) => (`t${ep.t}` === ft ? { status: 403 } : null), delay: false }));

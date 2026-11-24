@@ -265,4 +265,12 @@ assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안
   const other = new Error("Something else");
   assert.equal(ex(other), other);
 }
+// 요청 제한으로 중간에 멈춘 수집: 모은 댓글로 분석하고 '요청 제한' 안내를 띄운다(댓글이 꺼졌다는 틀린 안내가 아니라)
+{
+  fixture.doc.meta.collection = { sort: "random", limited: true, complete: false, pool: { size: 200, limit: 900, complete: false } };
+  await byId("btn-all").onclick();
+  const st = String(byId("status").textContent);
+  assert.ok(st.includes("분석 완료") && st.includes("요청을 계속 받지 않아서"), `limited 안내: ${st}`);
+  assert.ok(!st.includes("댓글이 꺼진"), "댓글이 꺼졌다는 안내는 없음");
+}
 console.log("panel smoke passed");
