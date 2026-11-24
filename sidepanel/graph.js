@@ -391,6 +391,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       emitSelection();
       onPick?.(drag.i);
     }
+    if (drag.type === "label") data.layout.endGroupDrag?.();
     if (drag.type === "label" && !drag.moved) { // 키워드를 그냥 누르면 그 주제의 댓글을 모두 고른다
       const c = drag.cluster;
       selection = new Set();
@@ -500,6 +501,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     unpinAll() {
       if (!data) return;
       for (let i = 0; i < data.nodes.length; i++) if (data.nodes[i].kind !== "doc") data.layout.release(i);
+      data.layout.releaseGroups?.();
       data.layout.reheat(0.5); animate(); draw();
     },
     fit() { autoFit = true; fitView(); draw(); },

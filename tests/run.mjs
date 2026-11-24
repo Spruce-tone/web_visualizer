@@ -582,7 +582,31 @@ for (let i = 0; i < three.length; i++) for (let j = i + 1; j < three.length; j++
 assert.ok(wi / wc < bt / bc, "같은 주제끼리 모인다");
 const before0 = fl.x[0];
 fl.moveGroup(lvS.ids[0], 30, 0);
-assert.equal(fl.x[0], before0 + 30, "키워드를 끌면 그 주제의 점이 함께 이동 (힘 배치)");
+assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 주제의 점이 함께 이동 (힘 배치)");
+{
+  // 끄는 동안 그 주제는 힘에 밀리지 않고 커서를 그대로 따르고, 놓은 뒤에도 중심이 그 자리에 머문다
+  const g0 = lvS.ids[0];
+  const mem = [...three.keys()].filter((i) => lvS.ids[i] === g0);
+  const cen = (L) => [mem.reduce((s, i) => s + L.x[i], 0) / mem.length, mem.reduce((s, i) => s + L.y[i], 0) / mem.length];
+  const mk = () => { const L = createLayout(three.map((_, i) => [Math.cos(i * 1.7) * 50, Math.sin(i * 1.3) * 50]), snnE.map((e) => ({ a: e.a, b: e.b, sim: 0.45 + 0.55 * e.w })), { groups: Array.from(lvS.ids), cohesion: 0.012 }); for (let i = 0; i < 300 && L.tick(); i++); return L; };
+  const L = mk();
+  const c0 = cen(L);
+  for (let f = 0; f < 20; f++) { L.moveGroup(g0, 15, 0); L.tick(); L.tick(); }
+  const c1 = cen(L);
+  assert.ok(Math.abs(c1[0] - c0[0] - 300) < 1e-2 && Math.abs(c1[1] - c0[1]) < 1e-2, "끄는 동안 주제 중심이 커서와 같이 움직인다");
+  L.endGroupDrag();
+  for (let i = 0; i < 400 && L.tick(); i++);
+  const c2 = cen(L);
+  assert.ok(Math.hypot(c2[0] - c1[0], c2[1] - c1[1]) < 1, "놓은 뒤에도 주제 중심이 그 자리에 머문다");
+  // 다시 그릴 때 주제가 그대로면 옮긴 자리를 이어받는다
+  const K2 = createLayout(three.map(() => [0, 0]), [], { groups: Array.from(lvS.ids), cohesion: 0.012, keep: L, alpha: 0.3 });
+  for (let i = 0; i < 400 && K2.tick(); i++);
+  const c3 = cen(K2);
+  assert.ok(Math.hypot(c3[0] - c1[0], c3[1] - c1[1]) < 1, "다시 그려도 옮긴 주제 자리를 이어받는다");
+  // '고정 풀기'
+  L.releaseGroups();
+  assert.equal(L.held.size, 0);
+}
 
 // ---- 겹침 분류 (여러 주제) ----
 const { overlapTopics, OVERLAP_MAX_EXTRA } = await import("../lib/community.js");
