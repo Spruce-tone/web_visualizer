@@ -460,6 +460,34 @@ assert.ok(!kwD[0].includes("민주당") && !kwD[1].includes("민주당"), `흔�
 assert.ok(kwD[0].includes("탄핵"));
 assert.ok(kwD[1].includes("경제"));
 
+// 큰 주제도 키워드를 갖는다 (실제 뉴스 댓글 모양의 합성 자료: 큰 주제는 흐릿하고 모든 주제에 공통 푸념이 섞임)
+const { koreanTopics } = await import("./ko-topics.mjs");
+const { minCount } = await import("../lib/keywords.js");
+assert.equal(minCount(4), 2);
+assert.equal(minCount(25), 3);
+assert.equal(minCount(300), 9, "300개 묶음은 36번(12%)이 아니라 9번(3%)이면 된다");
+// 모든 주제에 섞인 공통 푸념은 큰 주제에서 우연히 조금 많이 나와도 대개 키워드가 되지 않는다 (통계 검사라 드물게 섞일 수 있음 → 비율로 확인)
+const COMMON_RE = /알겠지|놀람|어이가|답답하다|한심하다|나라냐|걱정|정신|믿냐|무섭|막힌다|손해|모르겠다|안 되는|국민/;
+let koNoise = 0, koTopics = 0;
+for (let seed = 1; seed <= 40; seed++) {
+  const ko = koreanTopics({ seed });
+  const kk = topicKeywords(ko.groups, ko.texts, { k: 4 });
+  ko.names.forEach((name, i) => assert.equal(kk[i][0], name, `seed ${seed}: '${name}' 주제의 첫 키워드 (${kk[i]})`));
+  kk.forEach((ws) => { koTopics++; if (ws.some((w) => COMMON_RE.test(w))) koNoise++; });
+}
+assert.ok(koNoise / koTopics <= 0.05, `공통 푸념이 섞인 주제 ${koNoise}/${koTopics}`);
+// 주제 낱말이 아주 드문(10%) 두 주제도 비지 않는다
+const ko2 = koreanTopics({ sizes: { 자유: 300, 가짜뉴스: 120 }, coreRate: { 자유: 0.08, 가짜뉴스: 0.1 } });
+const kk2 = topicKeywords(ko2.groups, ko2.texts, { k: 4 });
+assert.deepEqual(kk2.map((x) => x[0]), ["자유", "가짜뉴스"]);
+// 흔한 어미·복수 떼기: 말뭉치 안에 근거가 있을 때만
+const st2 = buildStemmer([["처벌해야", "처벌하는", "처벌이", "기자들이", "기자는", "하는"]]);
+assert.equal(st2("처벌해야"), "처벌");
+assert.equal(st2("기자들이"), "기자");
+assert.equal(st2("하는"), "하는", "어간이 두 글자 미만이면 떼지 않는다");
+const st3 = buildStemmer([["공부하는"]]);
+assert.equal(st3("공부하는"), "공부하는", "표면형 하나뿐이면 떼지 않는다");
+
 const sl = createStaticLayout([0, 10, 20], [0, 0, 0], [-1, 0, 0]);
 sl.moveGroup(0, 5, 5);
 assert.deepEqual([sl.x[0], sl.x[1], sl.x[2], sl.pin[1]], [0, 15, 25, 1]);
