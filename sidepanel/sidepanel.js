@@ -692,6 +692,7 @@ function pickFromList(i) {
   graph.centerOn(i + 1);
   // '지도에서 고른 댓글' 목록에서는 지도 선택을 그대로 둔다 (선택 = 목록). 주제 목록에서는 그 점 하나만 고른다.
   if (listSrc !== "sel") graph.select([i + 1]);
+  graph.mark(i + 1); // 작은 점도 찾기 쉽게 굵은 테 + 잠깐 깜박임
   showDetail(i);
   renderRows();
 }

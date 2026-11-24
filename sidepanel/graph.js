@@ -28,6 +28,9 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
   let autoFit = true; // 사용자가 직접 옮기거나 확대하기 전까지는 크기가 바뀔 때 전체가 보이게 다시 맞춘다
   let hover = -1, hoverLabel = -1, drag = null, raf = 0;
   let selection = new Set();
+  // 목록에서 누른 점: 고른 동안 굵은 테, 처음 잠깐은 깜박이며 퍼지는 고리 (작은 점이라도 눈에 띄게)
+  let markI = -1, markT = 0, markRaf = 0;
+  const MARK_BLINK = 1200;
   let tags = new Int8Array(0); // -1 = 없음
   let tagCount = 4;
   let showLabels = true, showReplyLinks = true, showEdges = false, filter = "all"; // all | top(댓글만) | reply(답글만)
@@ -259,6 +262,22 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     ctx.beginPath();
     for (const i of selection) { const r = rad[i] * rk + 1.4; ctx.moveTo(sx[i] + r, sy[i]); ctx.arc(sx[i], sy[i], r, 0, Math.PI * 2); }
     ctx.stroke();
+    if (markI >= 0 && selection.has(markI) && markI < sx.length) {
+      const age = performance.now() - markT;
+      const r = rad[markI] * rk + 4;
+      if (age < MARK_BLINK) { // 퍼지며 옅어지는 고리
+        const f = age / MARK_BLINK;
+        ctx.globalAlpha = 1 - f;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(sx[markI], sy[markI], r + 4 + f * 18, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      if (age >= MARK_BLINK || Math.floor(age / 200) % 2 === 0) { // 처음엔 깜박이고, 그 뒤엔 굵은 테로 남는다
+        ctx.beginPath(); ctx.arc(sx[markI], sy[markI], r, 0, Math.PI * 2);
+        ctx.lineWidth = 6; ctx.strokeStyle = MAP.halo; ctx.stroke();
+        ctx.lineWidth = 3; ctx.strokeStyle = MAP.select; ctx.stroke();
+      }
+    }
     if (hover >= 0 && !selection.has(hover)) {
       ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(sx[hover], sy[hover], rad[hover] * rk + 1.2, 0, Math.PI * 2); ctx.stroke();
@@ -312,7 +331,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
   // 주제를 통째로 고르면 보조로 속한 댓글도 강조되지만, '내 분류'에는 주 주제 댓글만 담는다
   // (분류는 점마다 하나라서, 보조 댓글까지 담으면 다른 분류에 있던 댓글이 조용히 옮겨진다).
   let tagOnly = null; // null = 고른 점 모두 담기
-  const emitSelection = (only = null) => { tagOnly = only; onSelectionChange?.([...selection]); };
+  const emitSelection = (only = null) => { tagOnly = only; markI = -1; onSelectionChange?.([...selection]); };
   const emitTags = () => onTagsChange?.(api.tagCounts());
   const pos = (ev) => { const r = canvas.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
 
@@ -517,6 +536,15 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       data.layout.reheat(0.5); animate(); draw();
     },
     fit() { autoFit = true; fitView(); draw(); },
+    /** 점 i를 눈에 띄게: 굵은 테 + 잠깐 깜박임. 고른 점(selection)일 때만 보인다. 선택이 바뀌면 사라진다 */
+    mark(i) {
+      markI = i; markT = performance.now();
+      cancelAnimationFrame(markRaf);
+      const loop = () => { draw(); markRaf = markI === i && performance.now() - markT < MARK_BLINK + 50 ? requestAnimationFrame(loop) : 0; };
+      markRaf = requestAnimationFrame(loop);
+      draw();
+    },
+    marked: () => markI,
     /** 점 하나를 지도 가운데로 옮긴다 (너무 작게 보이면 조금 확대). 목록에서 댓글을 누를 때 쓴다. */
     centerOn(i, { minK = 1.2 } = {}) {
       if (!data || !(i >= 0 && i < data.nodes.length)) return;
