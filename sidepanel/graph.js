@@ -344,8 +344,9 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     }
   });
 
-  canvas.addEventListener("mousemove", (ev) => {
-    if (!data) return;
+  // 끄는 중에는 창 전체에서 받는다: 커서가 지도 밖으로 나가도 주제·점·화면이 계속 따라온다
+  window.addEventListener("mousemove", (ev) => {
+    if (!data || (!drag && ev.target !== canvas)) return;
     const [mx, my] = pos(ev);
     if (drag?.type === "label") {
       const [wx, wy] = toWorld(mx, my);
@@ -381,7 +382,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       canvas.style.cursor = hl >= 0 ? "move" : h >= 0 && data.nodes[h].kind !== "doc" ? "pointer" : "grab";
       if (!raf) draw();
     }
-    showTooltip(h, mx, my);
+    if (ev.target === canvas) showTooltip(h, mx, my);
   });
 
   // 창 밖에서 버튼을 놓으면 mouseup이 오지 않는다 → 끌던 주제가 힘 계산에서 빠진 채 굳지 않게 끝낸다
