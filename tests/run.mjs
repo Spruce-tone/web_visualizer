@@ -682,6 +682,23 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
     assert.ok(h.gap < 3, `섬 없음: ${name} (틈 ${h.gap.toFixed(2)})`);
   }
 }
+{
+  // 서로만 닿은 주제 무리(A–B, C–D, 무리 사이 선 0)를 멀리 떨어뜨려 시작해도 하나로 모인다 (주제별 틈 기준으로는 못 잡는 경우)
+  let sd = 5; const r = () => ((sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const pair = [0, 0, 1, 1];
+  const gg = [0, 1, 2, 3].flatMap((g) => Array(60).fill(g)), M = gg.length;
+  const ee = [];
+  for (let i = 0; i < M; i++) {
+    for (let t = 0; t < 3; t++) { const j = gg[i] * 60 + Math.floor(r() * 60); if (j !== i) ee.push({ a: i, b: j, sim: 0.6 }); }
+    for (let t = 0; t < 2; t++) { const j = Math.floor(r() * M); if (gg[j] !== gg[i] && pair[gg[j]] === pair[gg[i]]) ee.push({ a: i, b: j, sim: 0.6 }); }
+  }
+  const L = createLayout(gg.map((g) => [r() * 100 - 50 + (pair[g] ? 300 : -300), r() * 100 - 50]), ee, { groups: gg, cohesion: 0.05, alpha: 0.6 });
+  for (let f = 0; f < 3000 && L.tick(); f++);
+  const nn = Array.from({ length: M }, (_, i) => { let b = Infinity; for (let j = 0; j < M; j++) if (j !== i) b = Math.min(b, Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j])); return b; }).sort((p, q) => p - q);
+  const m = nn[M >> 1], par = Array.from({ length: M }, (_, i) => i), find = (i) => (par[i] === i ? i : (par[i] = find(par[i])));
+  for (let i = 0; i < M; i++) for (let j = i + 1; j < M; j++) if (Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j]) <= 3 * m) par[find(i)] = find(j);
+  assert.equal(new Set(Array.from({ length: M }, (_, i) => find(i))).size, 1, "서로만 닿은 주제 무리도 섬이 되지 않는다");
+}
 
 // ---- 겹침 분류 (여러 주제) ----
 const { overlapTopics, OVERLAP_MAX_EXTRA } = await import("../lib/community.js");
