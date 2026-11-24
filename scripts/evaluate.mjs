@@ -290,8 +290,11 @@ if (JSON_OUT) {
     const { execFileSync } = await import("node:child_process");
     execFileSync("git", ["check-ignore", "-q", JSON_OUT], { stdio: "ignore" });
   } catch (e) {
+    // 1 = 무시 안 됨. 그 밖(128: 저장소 밖·git 오류, git 없음)은 무시되는지 확인하지 못한 것이므로 역시 경고한다
     if (e.status === 1) console.warn(`⚠ ${JSON_OUT} 는 git이 무시하지 않는 곳입니다. 키워드·주제 이름(댓글 낱말)이 들어 있으니 커밋하지 마세요. 기본 위치: fixtures/set/evaluate.json`);
+    else console.warn(`⚠ ${JSON_OUT} 가 git에서 무시되는지 확인하지 못했습니다(${e.status ?? e.code}). 키워드·주제 이름(댓글 낱말)이 들어 있으니 공개 저장소에 올리지 마세요.`);
   }
+  fs.mkdirSync(path.dirname(JSON_OUT) || ".", { recursive: true });
   fs.writeFileSync(JSON_OUT, JSON.stringify({ bias: [...byCat.entries()], rows }, null, 1));
   console.log(`\n저장: ${JSON_OUT}`);
 }

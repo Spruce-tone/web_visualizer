@@ -26,7 +26,7 @@ content/youtube.js       수집(무작위 추출 포함), 댓글 열기, 메시�
 content/page-bridge.js   페이지(MAIN world) 다리: 댓글 영역만 다시 불러와 원하는 댓글을 띄움
 content/parse.js         YouTube 응답·시간·숫자 파싱
 lib/embed/hash.js        문구 임베딩 (복붙 신호용)
-lib/embed/semantic.js    의미 임베딩 (Transformers.js: 자동 GPU→EmbeddingGemma, CPU→Bekko / 선택 Qwen3)
+lib/embed/semantic.js    의미 임베딩 (Transformers.js: 자동 = Bekko(GPU 있으면 GPU로) / 선택 EmbeddingGemma·Qwen3, 근거 docs/validation.md)
 lib/vec.js               이웃 찾기, PCA, 평균 빼기
 lib/umap.js              첫 배치 (UMAP 방식)
 lib/community.js         SNN 그래프 + Louvain 주제 묶기
