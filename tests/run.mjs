@@ -559,4 +559,46 @@ const { overlapTopics, OVERLAP_MAX_EXTRA } = await import("../lib/community.js")
   assert.deepEqual(tie.extra[8], many.extra[8], "같은 힘이면 주제 번호 순 (엣지 순서와 무관)");
 }
 
+// ---- 같은 키워드 주제 합치기 ----
+const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/community.js");
+{
+  const clique = (xs, w) => { const e = []; for (let p = 0; p < xs.length; p++) for (let q = p + 1; q < xs.length; q++) e.push({ a: xs[p], b: xs[q], w }); return e; };
+  const r = (a, b) => Array.from({ length: b - a }, (_, i) => a + i);
+  // 점 0 = 본문(-1). 주제 0: 1~6, 주제 1: 7~12, 주제 2: 13~18, 주제 3: 19~24
+  const ids = [-1, ...r(1, 7).map(() => 0), ...r(7, 13).map(() => 1), ...r(13, 19).map(() => 2), ...r(19, 25).map(() => 3)];
+  const base = [...clique(r(1, 7), 0.5), ...clique(r(7, 13), 0.5), ...clique(r(13, 19), 0.5), ...clique(r(19, 25), 0.5)];
+  // 주제 0–1: 서로 잘 이어짐 / 주제 2: 0과 다리 하나 / 주제 3: 1과 잘 이어졌지만 키워드가 다름
+  const cross = [];
+  for (const a of [1, 2, 3, 4]) for (const b of [7, 8, 9]) cross.push({ a, b, w: 0.3 });
+  for (const a of [19, 20, 21, 22]) for (const b of [10, 11, 12]) cross.push({ a, b, w: 0.3 });
+  const edges = [...base, ...cross, { a: 5, b: 13, w: 0.05 }, { a: 0, b: 1, w: 1 }];
+  const KW = { 0: ["가짜뉴스", "처벌"], 1: ["가짜뉴스", "비판"], 2: ["가짜뉴스", "혐오"], 3: ["언론", "기자"] };
+  // 키워드는 그 주제에 원래 주제 몫이 가장 많은 쪽을 따른다 (합치면 큰 쪽 이름)
+  const kwOf = (cur) => { const out = []; for (let i = 1; i < cur.length; i++) if (cur[i] >= 0 && !out[cur[i]]) out[cur[i]] = KW[ids[i]]; return out; };
+  const link = topicLinkRatio(ids, edges);
+  assert.ok(link(0, 1) >= 0.5, `잘 이어진 두 주제의 연결 비율 ${link(0, 1)}`);
+  assert.ok(link(0, 2) < 0.1, `다리 하나뿐인 주제의 연결 비율 ${link(0, 2)}`);
+  assert.equal(link(0, 1), link(1, 0), "대칭");
+  const mg = mergeSameKeywordTopics(ids, edges, kwOf);
+  assert.equal(mg.ids[0], -1, "본문은 그대로");
+  assert.ok(r(1, 13).every((i) => mg.ids[i] === mg.ids[1]), "첫 키워드가 같고 서로 이어진 두 주제는 합친다");
+  assert.ok(r(13, 19).every((i) => mg.ids[i] === 2), "첫 키워드가 같아도 거의 안 이어진 주제는 그대로");
+  assert.ok(r(19, 25).every((i) => mg.ids[i] === 3), "잘 이어져도 키워드가 다르면 그대로");
+  assert.deepEqual(mg.merges.map((m) => m.by), ["keyword1"]);
+  // 세밀도가 높을수록(잘게 나눌수록) 합치는 데 더 강한 연결이 필요하다
+  const mgFine = mergeSameKeywordTopics(ids, edges, kwOf, { resolution: 2 });
+  assert.notEqual(mgFine.ids[1], mgFine.ids[7], "세밀도 2: 연결 비율 0.65 < 1 → 합치지 않음");
+  // 앞 두 키워드가 같으면 연결과 무관하게 합친다 (이전 규칙)
+  const KW2 = { ...KW, 2: ["처벌", "가짜뉴스"] };
+  const mg2 = mergeSameKeywordTopics(ids, edges, (cur) => { const out = []; for (let i = 1; i < cur.length; i++) if (cur[i] >= 0 && !out[cur[i]]) out[cur[i]] = KW2[ids[i]]; return out; });
+  assert.ok(r(1, 19).every((i) => mg2.ids[i] === mg2.ids[1]), "앞 두 키워드가 같으면 합친다");
+  // 결정적, 엣지 순서와 무관
+  assert.deepEqual([...mergeSameKeywordTopics(ids, [...edges].reverse(), kwOf).ids], [...mg.ids]);
+  // 합친 뒤 겹침을 다시 재면, 두 주제 사이에 걸쳐 있던 점은 더 이상 겹침이 아니다
+  const before = overlapTopics(ids, edges), after = overlapTopics(mg.ids, edges);
+  assert.ok(before.extra.some((x) => x.length > 0), "합치기 전에는 0–1 사이 겹침이 있다");
+  assert.ok(r(1, 13).every((i) => !after.extra[i].includes(mg.ids[1])), "합친 주제는 자기 보조 주제가 되지 않는다");
+  assert.ok(after.extra.flat().length < before.extra.flat().length, "합친 뒤 겹침이 줄어든다");
+}
+
 console.log("all tests passed");

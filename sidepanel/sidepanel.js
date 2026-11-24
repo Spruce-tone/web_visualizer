@@ -8,7 +8,7 @@ import { hashEmbed } from "../lib/embed/hash.js";
 import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast } from "../lib/vec.js";
 import { kmeans, isShortReaction } from "../lib/cluster.js";
 import { fuzzyGraph, umapLayout, toPixels } from "../lib/umap.js";
-import { louvain, snnGraph, overlapTopics } from "../lib/community.js";
+import { louvain, snnGraph, overlapTopics, mergeSameKeywordTopics } from "../lib/community.js";
 import { createLayout } from "../lib/layout.js";
 import { timeHistogram } from "../lib/analyze.js";
 import { clusterSignals } from "../lib/signals.js";
@@ -269,7 +269,8 @@ function computeLex() {
 
 /**
  * 주제 쪽 계산: 이웃 그래프의 커뮤니티(Louvain). 세밀도가 바뀔 때만 다시 한다. 점의 위치는 바뀌지 않는다.
- * 키워드가 같은 묶음은 하나로 합친다 (같은 이야기인데 둘로 갈린 경우).
+ * 키워드가 같은 묶음은 하나로 합친다 (같은 이야기인데 둘로 갈린 경우, lib/community.js mergeSameKeywordTopics).
+ * 겹침(보조 주제)은 합친 뒤의 주제로 계산한다.
  */
 function computeTopics() {
   const { comments, short, graphEdges } = S;
@@ -280,19 +281,11 @@ function computeTopics() {
   let ids = Int32Array.from({ length: n }, (_, i) => (short[i] ? -1 : lv.ids[i + 1]));
   const texts = comments.map((c) => c.text);
   const groupsOf = (arr) => { const g = []; arr.forEach((c, i) => { if (c >= 0) (g[c] ||= []).push(i); }); return g.map((x) => x || []); };
-  let groups = groupsOf(ids), kws = topicKeywords(groups, texts, { k: 4 });
-  for (let round = 0; round < 4; round++) {
-    const seen = new Map();
-    let merged = false;
-    groups.forEach((g, c) => {
-      if (!g.length || kws[c].length < 2) return;
-      const key = kws[c].slice(0, 2).sort().join("|");
-      if (seen.has(key)) { const to = seen.get(key); for (const i of g) ids[i] = to; merged = true; }
-      else seen.set(key, c);
-    });
-    if (!merged) break;
-    groups = groupsOf(ids); kws = topicKeywords(groups, texts, { k: 4 });
-  }
+  // 키워드가 같고 서로 이어진 주제는 합친다 (점 번호 기준: 0 = 본문, i+1 = 댓글 i)
+  const mg = mergeSameKeywordTopics(Int32Array.from({ length: n + 1 }, (_, k) => (k === 0 ? -1 : ids[k - 1])), graphEdges,
+    (pt) => topicKeywords(groupsOf(Array.from(pt.subarray(1))), texts, { k: 4 }), { resolution: resolutionOf(v) });
+  ids = Int32Array.from(mg.ids.subarray(1));
+  let groups = groupsOf(ids), kws;
   // 큰 묶음부터 번호를 다시 매긴다
   const order = groups.map((g, c) => [c, g.length]).filter(([, s2]) => s2 > 0).sort((p, q) => q[1] - p[1] || p[0] - q[0]);
   const rank = new Map(order.map(([c], r) => [c, r]));
@@ -322,7 +315,7 @@ function computeTopics() {
   const sIdx = [];
   short.forEach((sh, i) => { if (sh) { sIdx.push(i); ids[i] = K; } });
   if (sIdx.length) { const t = summarize(sIdx, K, ["짧은 반응"], true); t.extra = 0; t.members = sIdx; topics.push(t); }
-  return { topicKey: v, topic: { ids }, extraOf, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), K };
+  return { topicKey: v, topic: { ids }, merges: mg.merges, extraOf, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), K };
 }
 
 /** 기준이 바뀌면 필요한 쪽만 다시 계산. 손으로 옮긴 점과 내 분류는 유지한다. */
