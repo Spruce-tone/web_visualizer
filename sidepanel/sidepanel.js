@@ -1131,9 +1131,8 @@ async function initModels() {
 }
 
 renderTags();
-initModels();
-initWeights();
+const ready = Promise.all([initModels(), initWeights()]);
 if (fixedTab) restoreFromPanel();
 
 // 자동 점검용 연결 고리 (tests/panel-smoke.mjs). 확장 프로그램에서는 정의돼 있지 않아 아무 일도 하지 않는다.
-globalThis.__WV_TEST__?.({ graph, rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });
+globalThis.__WV_TEST__?.({ ready, graph, rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });

@@ -577,13 +577,22 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
     await assert.rejects(WV.withBackoff(async () => { sent++; throw Object.assign(new Error("x"), { status: 429 }); }, { sleep: async () => { stopNow = true; }, stop: () => stopNow }));
     assert.equal(sent, 1, "쉬는 동안 중지 → 다시 보내지 않음");
   }
-  // 요청 시작 간격: minGapMs를 지킨다
-  const starts = [];
-  const yg = fakeYT({ tops: 200 });
-  const pg = yg.page;
-  await WV.sampleRandom({ start: { p: 0 }, page: (e, r) => { starts.push(Date.now()); return pg(e, r); }, max: 40, seed: "g", minGapMs: 15 });
-  const gaps = starts.slice(1).map((t, i) => t - starts[i]);
-  assert.ok(Math.min(...gaps) >= 13, `요청 시작 간격 ${Math.min(...gaps)}ms ≥ 15ms(타이머 오차 2ms)`);
+  // 요청 시작 간격: minGapMs를 지킨다 (가짜 시계: sleep이 시계를 앞으로 돌린다 → 실제 타이머 오차와 무관)
+  {
+    let clock = 1000; const starts = [], waits = [];
+    const yg = fakeYT({ tops: 200 });
+    const pg = yg.page;
+    await WV.sampleRandom({ start: { p: 0 }, page: (e, r) => { starts.push(clock); return pg(e, r); }, max: 40, seed: "g", minGapMs: 15,
+      now: () => clock, sleep: async (ms) => { waits.push(ms); clock += ms; } });
+    const gaps = starts.slice(1).map((t, i) => t - starts[i]);
+    assert.ok(starts.length > 5 && waits.length >= starts.length - 1, "요청마다 간격을 기다림");
+    assert.ok(gaps.every((g) => g >= 15), `요청 시작 간격 ${Math.min(...gaps)} ≥ 15`);
+    // 시계가 이미 간격만큼 갔으면 기다리지 않는다
+    clock = 0; waits.length = 0;
+    await WV.sampleRandom({ start: { p: 0 }, page: (e, r) => { clock += 20; return pg(e, r); }, max: 40, seed: "g", minGapMs: 15, includeReplies: false,
+      now: () => clock, sleep: async (ms) => { waits.push(ms); clock += ms; } });
+    assert.equal(waits.length, 0, "간격이 이미 지났으면 쉬지 않음");
+  }
 }
 
 // ---- 연속 지도(UMAP)와 커뮤니티(Louvain), 가르는 키워드 ----

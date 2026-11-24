@@ -91,7 +91,7 @@ globalThis.Worker = class {
 };
 const panelMod = await import("../sidepanel/sidepanel.js");
 assert.ok(api, "패널 스크립트가 끝까지 실행됨");
-await new Promise((r) => setTimeout(r, 50)); // 모델·가중치 초기화 대기
+await api.ready; // 모델·가중치 초기화가 끝날 때까지 (실제 시간에 기대지 않음)
 
 // 1) 분석 실행 (의미 모델은 Node에 없으므로 문구 기준 경로)
 await byId("btn-all").onclick();

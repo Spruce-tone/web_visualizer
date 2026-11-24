@@ -180,16 +180,17 @@ WV.withBackoff = async function (fn, { tries = 4, baseMs = 800, sleep = WV.sleep
  * @param {(count:number, total:number|null, phase:string)=>void} [o.onProgress]
  * @param {() => boolean} [o.isCancelled]
  * @param {(ms:number)=>Promise<void>} [o.sleep]
+ * @param {() => number} [o.now] 시계(ms). 테스트에서 가짜 시계를 넣는다
  * @param {{tries?: number, baseMs?: number}} [o.backoff]
  */
-WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = true, concurrency = 3, minGapMs = 100, onProgress, isCancelled = () => false, sleep = WV.sleep, backoff = {} }) {
+WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = true, concurrency = 3, minGapMs = 100, onProgress, isCancelled = () => false, sleep = WV.sleep, now = Date.now, backoff = {} }) {
   let lanes = Math.max(1, concurrency);
   // 시작 간격 맞추기: 기다리는 요청들을 한 줄로 세워, 앞 요청이 실제로 나간 시각에서 minGapMs를 잰다(타이머가 한꺼번에 깨어나도 몰리지 않게)
   let gate = Promise.resolve(), last = -Infinity;
   const spaced = () => (gate = gate.then(async () => {
-    const w = last + minGapMs - Date.now();
+    const w = last + minGapMs - now();
     if (w > 0) await sleep(w);
-    last = Date.now();
+    last = now();
   }));
   // 막힘 판단은 모든 요청이 함께 센다: 성공 없이 다시 시도할 실패가 tries번 이어지면 limited → 더 보내지 않는다
   // (동시에 나간 요청들이 저마다 4번씩 두드리지 않게. 막힌 뒤 나가는 요청은 이미 나가 있던 lanes-1개뿐)
