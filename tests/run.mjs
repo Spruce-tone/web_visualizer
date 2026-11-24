@@ -1078,6 +1078,12 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.deepEqual(await sem.runChecked(flaky, ["a", "long", "b"]), [[1, 0], [1, 0], [1, 0]]);
   assert.deepEqual(calls, [3, 1], "NaN 줄만 따로 한 번");
   await assert.rejects(sem.runChecked(async (x) => x.map(() => [NaN]), ["a"]), /숫자가 아닌 값/);
+  // 하나씩 돌려도 NaN이면 그 줄만 대체(CPU)로, 나머지 줄은 그대로
+  const fb = [];
+  const gpuBad = async (texts) => texts.map((x) => (x === "bad" ? [NaN, 0] : [1, 0]));
+  assert.deepEqual(await sem.runChecked(gpuBad, ["a", "bad", "b"], async (xs) => { fb.push(...xs); return xs.map(() => [0, 1]); }), [[1, 0], [0, 1], [1, 0]]);
+  assert.deepEqual(fb, ["bad"], "대체는 문제 줄만");
+  await assert.rejects(sem.runChecked(gpuBad, ["bad"], async (xs) => xs.map(() => [NaN, 0])), /숫자가 아닌 값/, "대체도 NaN이면 오류");
 }
 
 console.log("all tests passed");
