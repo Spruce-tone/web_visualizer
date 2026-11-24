@@ -870,6 +870,20 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
     const all = [...mv].sort((p, q) => p - q)[N >> 1];
     assert.ok(all < 0.42 && same[same.length >> 1] < 0.3, `덜 움직인다 (중앙값 ${all.toFixed(2)}, 그대로인 주제 ${same[same.length >> 1].toFixed(2)} × 점 간격)`);
   }
+  // 보조 주제 댓글은 그 주제를 끌 때 반쯤 따라온다 (주 주제 댓글은 그 자리)
+  {
+    const extra = grp.map((g, i) => (g === 1 && i % 20 === 1 ? [2] : []));
+    const L = createLayout(init, es, { groups: grp, cohesion: 0.05, alpha: 0.6, extra });
+    for (let f = 0; f < 3000 && L.tick(); f++);
+    const cenOf = (f) => { let sx = 0, c = 0; for (let i = 0; i < N; i++) if (f(i)) { sx += L.x[i]; c++; } return sx / c; };
+    const isSec = (i) => extra[i].length > 0, isRest1 = (i) => grp[i] === 1 && !isSec(i);
+    const s0 = cenOf(isSec), r0 = cenOf(isRest1), g0 = cenOf((i) => grp[i] === 2);
+    for (let f = 0; f < 30; f++) { L.moveGroup(2, 10, 0); L.tick(); L.tick(); }
+    L.endGroupDrag();
+    const fs2 = (cenOf(isSec) - s0) / 300, fr = (cenOf(isRest1) - r0) / 300;
+    assert.ok(cenOf((i) => grp[i] === 2) - g0 > 290, "끈 주제는 커서를 따른다");
+    assert.ok(fs2 > 0.3 && fs2 > fr + 0.1, `보조 댓글은 따라온다 (${fs2.toFixed(2)}, 같은 주 주제의 나머지 ${fr.toFixed(2)})`);
+  }
   // 어려운 경우: 주제 크기 차이가 큼 / 주제 사이 선이 거의 없음 / 선이 적은 주제 / 둘 다
   const hard = (sizes, { cross = 2, sparse = -1 } = {}) => {
     let sd = 11; const r = () => ((sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648);
