@@ -935,6 +935,15 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
     assert.equal(big3.state === "natural", big3.meanSim < 0.3, `문구 기준 0.3: 평균 ${big3.meanSim.toFixed(2)}이면 사슬 판정은 0.3과 견준다`);
     assert.ok(big3.meanSim >= 0.3 ? big3.state === "scored" : true, "0.3 넘는 평균이면 사슬로 빼지 않고 점수를 낸다");
   }
+  // 슬라이더를 0.6보다 올려도: 낱말 하나씩만 바꾼 복사 글(평균 0.76)은 사슬로 빠지지 않고 점수를 받는다
+  {
+    const base = "이 영상 꼭 끝까지 보세요 진실이 다 나옵니다 주변에 널리 알려 주세요";
+    const near = [base, base.replace("꼭", "제발"), base.replace("널리", "많이"), base.replace("주변에", "가족들에게")].map((t, i) => mk(t, "n" + i));
+    near.push(mk("오늘 점심은 김치찌개를 먹었는데 맛있었다", "n8"), mk("편집이 깔끔해서 보기 좋네요 자막도 좋고요", "n9"));
+    const hi = signalsFor(near, null, 0.8).sig.find((x) => x.size >= 3);
+    assert.ok(hi, "문구 기준 0.8에서도 복사 글 묶음이 생긴다");
+    assert.equal(hi.state, "scored", `문구 기준 0.8: 거의 같은 복사 글(평균 ${hi.meanSim.toFixed(2)})은 점수를 받는다`);
+  }
   // 같은 긴 문구를 여러 작성자가 그대로 쓰면 여전히 점수
   const copy = Array.from({ length: 6 }, (_, i) => mk("이 영상 꼭 끝까지 보세요 진실이 다 나옵니다 주변에 널리 퍼뜨려 주세요", "p" + i));
   copy.push(mk("오늘 점심은 김치찌개를 먹었는데 맛있었다", "q1"), mk("편집이 깔끔해서 보기 좋네요 자막도 좋고요", "q2"));
