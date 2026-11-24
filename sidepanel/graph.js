@@ -319,6 +319,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
   canvas.addEventListener("mousedown", (ev) => {
     if (!data) return;
     canvas.focus();
+    ev.preventDefault(); // 끌다가 지도 밖으로 나가도 옆 목록 글자가 선택되지 않게
     const [mx, my] = pos(ev);
     const li = pickLabel(mx, my);
     if (li >= 0) { // 키워드를 끌면 그 주제 전체가 따라온다
