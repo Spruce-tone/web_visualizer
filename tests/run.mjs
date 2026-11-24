@@ -428,13 +428,14 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
 // ---- 고르게 무작위 추출 (WV.sampleRandom): 가짜 YouTube로 공정성·동시 요청·물러나기 ----
 {
   // tops개 원댓글, 한 쪽에 20개. i % 7 == 0 인 스레드는 답글 (i % 13) + 1개, 한 쪽에 5개씩(답글 더보기 사슬)
+  // delay: true = 호출 순번으로 정한 0~3ms, 함수면 (st, ep) → ms (끝나는 순서를 바꿔 보기)
   const fakeYT = ({ tops = 3000, fail = () => null, delay = true } = {}) => {
     const st = { calls: 0, inflight: 0, peak: 0, replyCalls: 0 };
     const nRep = (i) => (i % 7 === 0 ? (i % 13) + 1 : 0);
     const page = async (ep) => {
       st.calls++; st.inflight++; st.peak = Math.max(st.peak, st.inflight);
       try {
-        if (delay) await new Promise((r) => setTimeout(r, (st.calls * 7919) % 4)); // 끝나는 순서를 섞는다
+        if (delay) await new Promise((r) => setTimeout(r, typeof delay === "function" ? delay(st, ep) : (st.calls * 7919) % 4)); // 끝나는 순서를 섞는다
         const err = fail(ep, st);
         if (err) throw err;
         const out = { comments: [], next: [], replies: [], threads: [], total: tops * 2, error: null };
@@ -478,7 +479,8 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
     }
     return out.map((c) => c.id);
   };
-  const ref = await reference(fakeYT(), 300, WV.poolLimit(300));
+  const yRef = fakeYT();
+  const ref = await reference(yRef, 300, WV.poolLimit(300));
   const y1 = fakeYT(), y3 = fakeYT();
   const s1 = await run({ concurrency: 1 }, y1), s3 = await run({ concurrency: 3 }, y3);
   assert.equal(JSON.stringify(s1.comments.map((c) => c.id)), JSON.stringify(ref), "동시 1개 = 예전 방식");
@@ -488,7 +490,17 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
   assert.equal(s3.pool.size, 900); assert.equal(s3.pool.complete, false); assert.equal(s3.complete, false);
   assert.ok(y3.st.peak <= 3 && y3.st.peak >= 2, `동시 요청 ${y3.st.peak}개 (최대 3)`);
   assert.equal(y1.st.peak, 1);
-  assert.ok(y3.st.replyCalls - y1.st.replyCalls <= 3, `미리 받다 버리는 답글 요청은 동시 수(3) 이하 (${y1.st.replyCalls} → ${y3.st.replyCalls})`);
+  assert.equal(y1.st.replyCalls, yRef.st.replyCalls, "동시 1개는 예전 방식과 답글 요청 수도 같다");
+  // 미리 받기는 스레드 첫 쪽만 → 다 채워 버리는 답글 요청은 미리 받던 스레드의 첫 쪽(동시 수 - 1개) 이하.
+  // 응답이 끝나는 순서와 상관없이 지켜져야 한다(예전엔 미리 받던 사슬을 끝까지 받아 CI에서 4개까지 버렸다) → 지연 모양을 바꿔 가며 확인
+  const lcg = (sd) => () => (sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const shapes = [true, (st, ep) => ("p" in ep ? 0 : ep.q === 0 ? 12 : 0), (st, ep) => ("p" in ep ? 0 : ep.t % 3 === 0 ? 15 : 0), ...[1, 2, 3].map((sd) => { const r = lcg(sd); return () => Math.floor(r() * 20); })];
+  for (const [si, shape] of shapes.entries()) for (const seed of ["VID", "c"]) {
+    const b1 = fakeYT({ delay: false }), b3 = fakeYT({ delay: shape });
+    const r1 = await run({ concurrency: 1, seed }, b1), r3 = await run({ concurrency: 3, seed }, b3);
+    assert.deepEqual(r3.comments.map((c) => c.id), r1.comments.map((c) => c.id), `지연 모양 ${si}, 씨앗 ${seed}: 결과 같음`);
+    assert.ok(b3.st.replyCalls - b1.st.replyCalls <= 2, `지연 모양 ${si}, 씨앗 ${seed}: 버리는 답글 요청 ${b3.st.replyCalls - b1.st.replyCalls}개 (2개 이하)`);
+  }
 
   // 2) 공정성: 뽑힌 원댓글의 후보 안 위치(최신순 순번)가 앞쪽에 몰리지 않는다 — 다섯 구간이 각각 20% 안팎
   const bins = [0, 0, 0, 0, 0];

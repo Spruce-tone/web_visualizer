@@ -225,11 +225,15 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
   const order = WV.seededShuffle(cand, seed);
   const comments = [], seen = new Set();
   let repliesOk = true, filled = false;
-  // 한 스레드의 답글: 그 스레드 안에서는 '답글 더보기'가 사슬이라 차례로 받는다. budget개를 넘으면 멈춘다.
-  const fetchThread = async (eps, budget) => {
+  // 한 스레드의 답글: 그 스레드 안에서는 '답글 더보기'가 사슬이라 차례로 받는다.
+  // 미리 받기는 첫 쪽만 한다. 다음 쪽은 담을 차례가 와서(reached) 남은 자리(budget)를 알게 된 뒤에만 받는다.
+  // → 다 채워 버려지는 요청은 미리 받던 스레드의 첫 쪽뿐(lanes-1개 이하). 사슬을 미리 끝까지 받으면 응답 속도에 따라 더 버려졌다(CI 실측 4개).
+  const fetchThread = async (eps, reached) => {
     const rq = [...eps], out = [];
     try {
-      while (rq.length && out.length < budget && !filled && !limited && !isCancelled()) {
+      let budget = Infinity;
+      for (let first = true; rq.length && out.length < budget && !filled && !limited && !isCancelled(); first = false) {
+        if (!first && budget === Infinity) { budget = await reached; continue; }
         const r = await call(rq.shift(), true);
         for (const c of r.comments) if (c.parentId) out.push(c);
         rq.push(...r.replies);
@@ -239,14 +243,14 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
     }
     return out;
   };
-  const jobs = new Map(); // 섞은 순서 위치 → 답글 Promise
+  const jobs = new Map(); // 섞은 순서 위치 → {replies: Promise, reach(budget)}
   let ahead = 0;
   const launch = (k) => {
-    // 앞으로 담을 스레드의 답글을 미리 받는다. 담기 전 것만 lanes개까지 → 끝에서 버리는 요청은 lanes-1개 이하
+    // 앞으로 담을 스레드의 답글 첫 쪽을 미리 받는다. 담기 전 것만 lanes개까지 → 끝에서 버리는 요청은 lanes-1개 이하
     ahead = Math.max(ahead, k);
     while (jobs.size < lanes && ahead < order.length) {
       const eps = withReplies ? threadEps.get(order[ahead].id) : null;
-      if (eps) jobs.set(ahead, fetchThread(eps, max - comments.length));
+      if (eps) { let reach; const reached = new Promise((r) => (reach = r)); jobs.set(ahead, { replies: fetchThread(eps, reached), reach }); }
       ahead++;
     }
   };
@@ -255,13 +259,16 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
     const top = order[k];
     if (!seen.has(top.id)) { seen.add(top.id); comments.push(top); }
     if (jobs.has(k)) {
-      const replies = await jobs.get(k);
+      const job = jobs.get(k);
+      job.reach(max - comments.length); // 원댓글을 담은 뒤 남은 자리만큼 사슬을 이어 받는다 (예전 차례 방식과 같은 조건)
+      const replies = await job.replies;
       jobs.delete(k);
       for (const c of replies) if (!seen.has(c.id) && comments.length < max) { seen.add(c.id); comments.push(c); }
       onProgress?.(comments.length, total, "답글 받는 중");
     }
   }
-  filled = true; // 다 담았으면 미리 받던 답글 사슬은 지금 요청까지만
+  filled = true; // 다 담았으면 미리 받던 답글은 지금 요청까지만
+  for (const job of jobs.values()) job.reach(0); // 차례를 기다리던 사슬도 끝낸다
   // 답글을 받다 limited가 되면 막힌 스레드(받은 답글까지)에서 멈추고 그 뒤 원댓글은 담지 않는다 — 답글 없는 원댓글만 이어 붙여 답글 비율이 틀어지지 않게
   // noReplies: 답글을 원했지만 후보 단계에서 막혀 답글을 하나도 받지 않았다 (패널이 그렇다고 알려 준다)
   return { comments, total, pool, limited, noReplies: includeReplies && scanLimited, complete: pool.complete && repliesOk && !limited && !isCancelled() };
