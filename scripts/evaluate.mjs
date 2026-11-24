@@ -2,7 +2,7 @@
 //   npm run evaluate                     → 복붙 의심 치우침 점검 + 모델 비교(gemma, bekko)
 //   npm run evaluate -- --bias           → 치우침 점검만 (모델 없이, 빠름)
 //   npm run evaluate -- --models bekko   → 고른 모델만
-//   npm run evaluate -- --json out.json  → 영상별 숫자를 파일로
+//   npm run evaluate -- --json [파일]    → 영상별 숫자를 파일로 (기본 fixtures/set/evaluate.json, 키워드 낱말이 들어가므로 커밋 금지)
 // 자료: fixtures/set/<분류>__<영상ID>.json (실제 댓글이라 저장소에 넣지 않음, .gitignore) 또는 fixtures/<분류>__<이름>.json
 //   목록·수집법은 fixtures/README.md, fixtures/validation-set.json
 // 통과 조건(치우침): (1) 오락 분류(music, game, daily)의 복붙 의심 비율 ≤ 5%  (2) politics-a 와 politics-b 의 의심 비율 차이 ≤ 5%p
@@ -26,7 +26,9 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : true; };
 const BIAS_ONLY = !!opt("bias", false);
 const MODELS = String(opt("models", "gemma,bekko")).split(",");
-const JSON_OUT = opt("json", null);
+// --json: 영상별 숫자 + 키워드·주제 이름(댓글에 쓰인 낱말)이 들어가므로 기본은 gitignore된 fixtures/set/ 아래
+let JSON_OUT = opt("json", null);
+if (JSON_OUT === true) JSON_OUT = "fixtures/set/evaluate.json";
 const ONLY = opt("only", null); // 파일 이름 일부로 거르기
 
 // ---------- 자료 ----------
@@ -282,5 +284,15 @@ for (const key of MODELS) {
   const sum = (k) => R.reduce((a, r) => a + r[k], 0);
   console.log(`  ${key}: 키워드 ${sum("kwTotal")}개 중 정확 검정(p>0.025)으로는 못 넘는 것 ${sum("approxOnly")} (첫 키워드 ${sum("approxOnlyFirst")}), 일반 욕설 ${sum("prof")} (첫 키워드 ${sum("profFirst")}), 큰 주제 둘의 공통 핵심어 빠짐 ${sum("lostShared")} (영상 ${R.filter((r) => r.lostShared).length}개), 80% 넘는 주제 ${R.filter((r) => r.dominant.length).length}개 영상`);
 }
-if (JSON_OUT) { fs.writeFileSync(JSON_OUT, JSON.stringify({ bias: [...byCat.entries()], rows }, null, 1)); console.log(`\n저장: ${JSON_OUT}`); }
+if (JSON_OUT) {
+  // 저장소가 추적할 수 있는 곳이면 경고 (키워드·주제 이름 = 댓글에 쓰인 낱말이 공개 저장소에 올라가지 않게)
+  try {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["check-ignore", "-q", JSON_OUT], { stdio: "ignore" });
+  } catch (e) {
+    if (e.status === 1) console.warn(`⚠ ${JSON_OUT} 는 git이 무시하지 않는 곳입니다. 키워드·주제 이름(댓글 낱말)이 들어 있으니 커밋하지 마세요. 기본 위치: fixtures/set/evaluate.json`);
+  }
+  fs.writeFileSync(JSON_OUT, JSON.stringify({ bias: [...byCat.entries()], rows }, null, 1));
+  console.log(`\n저장: ${JSON_OUT}`);
+}
 process.exit(ok ? 0 : 1);
