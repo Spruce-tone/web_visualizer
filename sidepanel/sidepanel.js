@@ -418,7 +418,7 @@ function drawMap({ fresh = false } = {}) {
     const groups = [-1, ...ids];
     // 첫 배치는 UMAP 좌표에서 시작해 힘 배치로 다듬는다. 다시 그릴 때는 지금 위치(손으로 옮긴 것 포함)를 이어받는다.
     const layout = createLayout(S.x.map((xx, i) => [xx, S.y[i]]), gEdges, {
-      pinned: [0], groups, cohesion: 0.012,
+      pinned: [0], groups, cohesion: 0.05,
       keep: prevLayout || V.restorePos || null,
       alpha: prevLayout ? 0.25 : 0.6,
     });

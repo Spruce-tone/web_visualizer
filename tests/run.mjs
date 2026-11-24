@@ -607,6 +607,52 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   L.releaseGroups();
   assert.equal(L.held.size, 0);
 }
+{
+  // 주제를 아는 배치: 이웃 선의 2/5가 다른 주제로 가는 섞인 그래프에서도 주제가 갈리되, 섬으로 끊기지 않는다
+  // (주제를 모르는 예전 배치: 응집 0.012 → 실루엣 0.05, 응집 0.05 → 0.25)
+  const N = 240, G = 4;
+  let seed = 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const grp = Array.from({ length: N }, (_, i) => i % G);
+  const es = [];
+  for (let i = 0; i < N; i++) {
+    for (let t = 0; t < 3; t++) { const j = grp[i] + G * Math.floor(rnd() * (N / G)); if (j !== i) es.push({ a: i, b: j, sim: 0.6 }); }
+    for (let t = 0; t < 2; t++) { const j = Math.floor(rnd() * N); if (grp[j] !== grp[i]) es.push({ a: i, b: j, sim: 0.6 }); }
+  }
+  const init = Array.from({ length: N }, () => [rnd() * 200 - 100, rnd() * 200 - 100]);
+  const settle = (cohesion) => { const L = createLayout(init, es, { groups: grp, cohesion, alpha: 0.6 }); for (let f = 0; f < 3000 && L.tick(); f++); return L; };
+  const sil = (L) => {
+    let s2 = 0;
+    for (let i = 0; i < N; i++) {
+      const sum = new Float64Array(G), cnt = new Float64Array(G);
+      for (let j = 0; j < N; j++) if (j !== i) { sum[grp[j]] += Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j]); cnt[grp[j]]++; }
+      const a = sum[grp[i]] / cnt[grp[i]];
+      let b = Infinity; for (let g = 0; g < G; g++) if (g !== grp[i]) b = Math.min(b, sum[g] / cnt[g]);
+      s2 += (b - a) / Math.max(a, b);
+    }
+    return s2 / N;
+  };
+  /** 근접 그래프(점 간격 중앙값의 3배 안) 덩어리 수와, 다른 주제까지 가장 먼 틈(점 간격 배수) */
+  const islandsOf = (L) => {
+    const nn = Array.from({ length: N }, (_, i) => { let b = Infinity; for (let j = 0; j < N; j++) if (j !== i) b = Math.min(b, Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j])); return b; }).sort((p, q) => p - q);
+    const m = nn[N >> 1];
+    const par = Array.from({ length: N }, (_, i) => i);
+    const find = (i) => (par[i] === i ? i : (par[i] = find(par[i])));
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) if (Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j]) <= 3 * m) par[find(i)] = find(j);
+    const comps = new Set(Array.from({ length: N }, (_, i) => find(i))).size;
+    let gap = 0;
+    for (let g = 0; g < G; g++) {
+      let b = Infinity;
+      for (let i = 0; i < N; i++) if (grp[i] === g) for (let j = 0; j < N; j++) if (grp[j] !== g) b = Math.min(b, Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j]));
+      gap = Math.max(gap, b / m);
+    }
+    return { comps, gap };
+  };
+  const strong = settle(0.05);
+  assert.ok(sil(strong) > 0.35, `주제가 또렷이 갈린다 (실루엣 ${sil(strong).toFixed(2)})`);
+  const isl = islandsOf(strong);
+  assert.equal(isl.comps, 1, "섬으로 끊기지 않는다 (근접 덩어리 하나)");
+  assert.ok(isl.gap < 3, `주제 사이 틈은 점 간격 3배 미만 (${isl.gap.toFixed(2)})`);
+}
 
 // ---- 겹침 분류 (여러 주제) ----
 const { overlapTopics, OVERLAP_MAX_EXTRA } = await import("../lib/community.js");
