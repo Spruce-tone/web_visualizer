@@ -181,14 +181,15 @@ WV.withBackoff = async function (fn, { tries = 4, baseMs = 800, sleep = WV.sleep
  */
 WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = true, concurrency = 3, minGapMs = 100, onProgress, isCancelled = () => false, sleep = WV.sleep, backoff = {} }) {
   let lanes = Math.max(1, concurrency);
-  let nextStart = 0;
-  const call = (ep, replies) => WV.withBackoff(async () => {
-    // 시작 간격 맞추기 (동시에 여러 요청이 기다려도 차례로 간격을 둔다)
-    const now = Date.now(), at = Math.max(now, nextStart);
-    nextStart = at + minGapMs;
-    if (at > now) await sleep(at - now);
-    return page(ep, replies);
-  }, { ...backoff, sleep, onRetry: () => { lanes = 1; } });
+  // 시작 간격 맞추기: 기다리는 요청들을 한 줄로 세워, 앞 요청이 실제로 나간 시각에서 minGapMs를 잰다(타이머가 한꺼번에 깨어나도 몰리지 않게)
+  let gate = Promise.resolve(), last = -Infinity;
+  const spaced = () => (gate = gate.then(async () => {
+    const w = last + minGapMs - Date.now();
+    if (w > 0) await sleep(w);
+    last = Date.now();
+  }));
+  const call = (ep, replies) => WV.withBackoff(async () => { await spaced(); return page(ep, replies); },
+    { ...backoff, sleep, onRetry: () => { lanes = 1; } });
 
   const limit = WV.poolLimit(max);
   const cand = [], seenTop = new Set(), threadEps = new Map();
