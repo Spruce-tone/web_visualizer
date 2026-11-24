@@ -464,6 +464,8 @@ assert.ok(kwD[1].includes("경제"));
 const { koreanTopics } = await import("./ko-topics.mjs");
 const { minCount } = await import("../lib/keywords.js");
 assert.equal(minCount(4), 2);
+assert.equal(minCount(16), 2);
+assert.equal(minCount(17), 3);
 assert.equal(minCount(25), 3);
 assert.equal(minCount(300), 9, "300개 묶음은 36번(12%)이 아니라 9번(3%)이면 된다");
 // 모든 주제에 섞인 공통 푸념은 큰 주제에서 우연히 조금 많이 나와도 대개 키워드가 되지 않는다 (통계 검사라 드물게 섞일 수 있음 → 비율로 확인)
@@ -476,10 +478,38 @@ for (let seed = 1; seed <= 40; seed++) {
   kk.forEach((ws) => { koTopics++; if (ws.some((w) => COMMON_RE.test(w))) koNoise++; });
 }
 assert.ok(koNoise / koTopics <= 0.05, `공통 푸념이 섞인 주제 ${koNoise}/${koTopics}`);
-// 주제 낱말이 아주 드문(10%) 두 주제도 비지 않는다
-const ko2 = koreanTopics({ sizes: { 자유: 300, 가짜뉴스: 120 }, coreRate: { 자유: 0.08, 가짜뉴스: 0.1 } });
-const kk2 = topicKeywords(ko2.groups, ko2.texts, { k: 4 });
-assert.deepEqual(kk2.map((x) => x[0]), ["자유", "가짜뉴스"]);
+// 주제 낱말이 아주 드문(8~10%) 경우: 근거가 약하면 이름을 비워 두되, 푸념을 이름으로 쓰지는 않는다
+for (let seed = 1; seed <= 20; seed++) {
+  const ko2 = koreanTopics({ seed, sizes: { 자유: 300, 가짜뉴스: 120 }, coreRate: { 자유: 0.08, 가짜뉴스: 0.1 } });
+  const kk2 = topicKeywords(ko2.groups, ko2.texts, { k: 4 });
+  ko2.names.forEach((name, i) => assert.ok(!kk2[i].length || kk2[i][0] === name, `seed ${seed}: 드문 주제 낱말 (${kk2[i]})`));
+}
+// 푸념이 한 주제에 몰려도(그 주제 푸념의 20%를 앞 다섯 개에서) 주제 낱말이 이름에 들어가고, 대개 첫 키워드다
+let skewFirst = 0;
+for (let seed = 1; seed <= 40; seed++) {
+  const ko3 = koreanTopics({ seed, skew: { 자유: 0.2 }, coreRate: { 자유: 0.15, 가짜뉴스: 0.6, 감시: 0.6, 기자: 0.7 } });
+  const kk3 = topicKeywords(ko3.groups, ko3.texts, { k: 4 });
+  ko3.names.forEach((name, i) => assert.ok(kk3[i].includes(name), `seed ${seed}: 몰린 푸념 속 주제 낱말 (${kk3[i]})`));
+  if (ko3.names.every((name, i) => kk3[i][0] === name)) skewFirst++;
+}
+assert.ok(skewFirst >= 38, `몰린 푸념: 주제 낱말이 첫 키워드인 경우 ${skewFirst}/40`);
+// 주제 낱말 없이 푸념만 있는 주제는 이름을 비워 둔다 ("주제 N"이 잡음 이름보다 낫다)
+{
+  const filler = ["이게 나라냐", "어이가 없네요", "참 답답하다", "세상 참 무섭네"];
+  const tx = [], gA = [], gB = [];
+  for (let i = 0; i < 40; i++) { gA.push(tx.length); tx.push(`표현의 자유 ${filler[i % 4]}`); }
+  for (let i = 0; i < 40; i++) { gB.push(tx.length); tx.push(filler[i % 4]); }
+  const kf = topicKeywords([gA, gB], tx, { k: 4 });
+  assert.ok(kf[0].includes("자유"), `${kf[0]}`);
+  assert.deepEqual(kf[1], [], "푸념만 있는 주제는 키워드 없음");
+  // 무작위로 섞은 경우에도 대부분 비어 있다 (통계 검사라 가끔 우연한 낱말이 통과함)
+  let named = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const kr = koreanTopics({ seed, sizes: { 자유: 300, 가짜뉴스: 120, 잡담: 150 } });
+    if (topicKeywords(kr.groups, kr.texts, { k: 4 })[2].length) named++;
+  }
+  assert.ok(named <= 12, `푸념만 있는 주제에 이름이 붙은 경우 ${named}/40`);
+}
 // 흔한 어미·복수 떼기: 말뭉치 안에 근거가 있을 때만
 const st2 = buildStemmer([["처벌해야", "처벌하는", "처벌이", "기자들이", "기자는", "하는"]]);
 assert.equal(st2("처벌해야"), "처벌");
@@ -487,6 +517,13 @@ assert.equal(st2("기자들이"), "기자");
 assert.equal(st2("하는"), "하는", "어간이 두 글자 미만이면 떼지 않는다");
 const st3 = buildStemmer([["공부하는"]]);
 assert.equal(st3("공부하는"), "공부하는", "표면형 하나뿐이면 떼지 않는다");
+// "들"로 끝나는 명사는 "X들"과 "X들+조사"끼리 서로 근거가 되지 않는다
+const st4 = buildStemmer([["큰아들", "큰아들이", "외아들", "외아들은"]]);
+assert.equal(st4("큰아들"), "큰아들");
+assert.equal(st4("큰아들이"), "큰아들");
+assert.equal(st4("외아들은"), "외아들");
+const st5 = buildStemmer([["기자들이", "기자들"]]);
+assert.equal(st5("기자들이"), "기자들", "'기자'나 '기자+조사'가 따로 없으면 '들'을 떼지 않는다");
 
 const sl = createStaticLayout([0, 10, 20], [0, 0, 0], [-1, 0, 0]);
 sl.moveGroup(0, 5, 5);
@@ -592,6 +629,11 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   const KW2 = { ...KW, 2: ["처벌", "가짜뉴스"] };
   const mg2 = mergeSameKeywordTopics(ids, edges, (cur) => { const out = []; for (let i = 1; i < cur.length; i++) if (cur[i] >= 0 && !out[cur[i]]) out[cur[i]] = KW2[ids[i]]; return out; });
   assert.ok(r(1, 19).every((i) => mg2.ids[i] === mg2.ids[1]), "앞 두 키워드가 같으면 합친다");
+  // 첫 키워드로 합친 주제도, 앞 두 키워드가 같은 다른 주제와 합쳐진다 (A[가짜뉴스,처벌]–B[가짜뉴스,비판] 연결, C[비판,가짜뉴스] 따로)
+  const KW3 = { ...KW, 2: ["비판", "가짜뉴스"] };
+  const mg3 = mergeSameKeywordTopics(ids, edges, (cur) => { const out = []; for (let i = 1; i < cur.length; i++) if (cur[i] >= 0 && !out[cur[i]]) out[cur[i]] = KW3[ids[i]]; return out; });
+  assert.ok(r(1, 19).every((i) => mg3.ids[i] === mg3.ids[1]), `B와 C(앞 두 키워드 같음)가 합쳐지고, 그 묶음이 A와 합쳐진다 (${[...mg3.ids]})`);
+  assert.ok(r(19, 25).every((i) => mg3.ids[i] === 3));
   // 결정적, 엣지 순서와 무관
   assert.deepEqual([...mergeSameKeywordTopics(ids, [...edges].reverse(), kwOf).ids], [...mg.ids]);
   // 합친 뒤 겹침을 다시 재면, 두 주제 사이에 걸쳐 있던 점은 더 이상 겹침이 아니다

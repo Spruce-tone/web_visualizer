@@ -44,13 +44,15 @@ export const TOPIC_CORE = {
 };
 
 /**
- * @param {{ sizes?: Record<string, number>, coreRate?: Record<string, number>, seed?: number }} opt
- *   sizes: 주제별 댓글 수, coreRate: 주제별로 핵심 문장이 들어가는 비율 (나머지는 공통 푸념만 → 흐릿한 주제)
+ * @param {{ sizes?: Record<string, number>, coreRate?: Record<string, number>, skew?: Record<string, number>, seed?: number }} opt
+ *   sizes: 주제별 댓글 수 (TOPIC_CORE에 없는 이름은 핵심 문장 없이 푸념만), coreRate: 주제별로 핵심 문장이 들어가는 비율
+ *   (나머지는 공통 푸념만 → 흐릿한 주제), skew: 주제별로 푸념을 앞 다섯 개에서만 고르는 비율 (푸념이 특정 주제에 몰리는 경우)
  * @returns {{ names: string[], groups: number[][], texts: string[] }}
  */
 export function koreanTopics({
   sizes = { 자유: 300, 가짜뉴스: 120, 감시: 80, 기자: 50 },
   coreRate = { 자유: 0.08, 가짜뉴스: 0.6, 감시: 0.6, 기자: 0.7 },
+  skew = {},
   seed = 7,
 } = {}) {
   const r = rng(seed);
@@ -61,9 +63,10 @@ export function koreanTopics({
     const g = [];
     for (let i = 0; i < sizes[name]; i++) {
       const parts = [];
-      if (r() < coreRate[name]) parts.push(pick(TOPIC_CORE[name]));
-      parts.push(pick(COMMON));
-      if (r() < 0.4) parts.push(pick(COMMON));
+      if (TOPIC_CORE[name] && r() < (coreRate[name] || 0)) parts.push(pick(TOPIC_CORE[name]));
+      const filler = () => (r() < (skew[name] || 0) ? pick(COMMON.slice(0, 5)) : pick(COMMON));
+      parts.push(filler());
+      if (r() < 0.4) parts.push(filler());
       if (r() < 0.5) parts.reverse();
       g.push(texts.length);
       texts.push(parts.join(" ") + (r() < 0.3 ? " ㅋㅋ" : r() < 0.3 ? "..." : ""));
