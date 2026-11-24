@@ -640,7 +640,8 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
     return s2 / N;
   };
   /** 근접 그래프(점 간격 중앙값의 3배 안) 덩어리 수와, 다른 주제까지 가장 먼 틈(점 간격 배수) */
-  const islandsOf = (L) => {
+  const islandsOf = (L, grp) => {
+    const N = grp.length, G = Math.max(...grp) + 1;
     const nn = Array.from({ length: N }, (_, i) => { let b = Infinity; for (let j = 0; j < N; j++) if (j !== i) b = Math.min(b, Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j])); return b; }).sort((p, q) => p - q);
     const m = nn[N >> 1];
     const par = Array.from({ length: N }, (_, i) => i);
@@ -657,9 +658,29 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   };
   const strong = settle(0.05);
   assert.ok(sil(strong) > 0.35, `주제가 또렷이 갈린다 (실루엣 ${sil(strong).toFixed(2)})`);
-  const isl = islandsOf(strong);
+  const isl = islandsOf(strong, grp);
   assert.equal(isl.comps, 1, "섬으로 끊기지 않는다 (근접 덩어리 하나)");
   assert.ok(isl.gap < 3, `주제 사이 틈은 점 간격 3배 미만 (${isl.gap.toFixed(2)})`);
+  // 어려운 경우: 주제 크기 차이가 큼 / 주제 사이 선이 거의 없음 / 선이 적은 주제 / 둘 다
+  const hard = (sizes, { cross = 2, sparse = -1 } = {}) => {
+    let sd = 11; const r = () => ((sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const gg = sizes.flatMap((m, g) => Array(m).fill(g)), M = gg.length;
+    const byG = sizes.map((_, g) => gg.map((v, i) => (v === g ? i : -1)).filter((i) => i >= 0));
+    const ee = [];
+    for (let i = 0; i < M; i++) {
+      for (let t = 0; t < (gg[i] === sparse ? 1 : 3); t++) { const j = byG[gg[i]][Math.floor(r() * byG[gg[i]].length)]; if (j !== i) ee.push({ a: i, b: j, sim: 0.6 }); }
+      if (cross >= 1 || r() < cross) for (let t = 0; t < Math.max(1, Math.floor(cross)); t++) { const j = Math.floor(r() * M); if (gg[j] !== gg[i]) ee.push({ a: i, b: j, sim: 0.6 }); }
+    }
+    const L = createLayout(gg.map(() => [r() * 200 - 100, r() * 200 - 100]), ee, { groups: gg, cohesion: 0.05, alpha: 0.6 });
+    for (let f = 0; f < 3000 && L.tick(); f++);
+    return islandsOf(L, gg);
+  };
+  for (const [name, sizes, o] of [["크기 차이 큼", [200, 40, 15, 8], {}], ["주제 사이 선 거의 없음", [60, 60, 60, 60], { cross: 0.02 }],
+    ["선이 적은 주제", [80, 80, 80], { sparse: 2 }], ["크기 차이 + 선 적음", [200, 40, 15, 8], { cross: 0.1 }]]) {
+    const h = hard(sizes, o);
+    assert.equal(h.comps, 1, `섬 없음: ${name} (덩어리 ${h.comps})`);
+    assert.ok(h.gap < 3, `섬 없음: ${name} (틈 ${h.gap.toFixed(2)})`);
+  }
 }
 
 // ---- 겹침 분류 (여러 주제) ----
