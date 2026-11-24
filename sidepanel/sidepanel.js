@@ -4,20 +4,15 @@
 // - 문구 임베딩(n-gram 해싱): 복붙 의심 신호 — 행동·구조만으로 점수
 // - 의미 임베딩(자동 선택): 지도 배치, 주제 묶음, '같은 주장 다른 표현'
 // - 평가 표현(어조): 설명용 탭과 색칠에만. 점수·배치에는 쓰지 않는다
-import { hashEmbed } from "../lib/embed/hash.js";
-import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast, packVectors, unpackVectors } from "../lib/vec.js";
-import { kmeans, isShortReaction } from "../lib/cluster.js";
-import { fuzzyGraph, umapLayout, toPixels } from "../lib/umap.js";
-import { louvain, snnGraph } from "../lib/community.js";
-import { topicPartition, resolutionOf } from "../lib/topics.js";
+import { dot, edgesFromNeighbors, clustersFromEdges, packVectors, unpackVectors } from "../lib/vec.js";
+import { analyzeComments, topicsAt, presetCounts, toneWords, FIRST_RES } from "../lib/pipeline.js";
 import { createLayout, thinEdges } from "../lib/layout.js";
 import { timeHistogram } from "../lib/analyze.js";
 import { clusterSignals } from "../lib/signals.js";
 import { DEFAULT_WEIGHTS, loadCalibrated } from "../lib/weights.js";
 import { authorFeatures, authorSignals, authorMap } from "../lib/authors.js";
-import { paraphraseGroups, pileOns, coActiveAuthors, SessionMemory } from "../lib/patterns.js";
-import { toneSummary, TONE_LABEL } from "../lib/tone.js";
-import { topicKeywords } from "../lib/keywords.js";
+import { pileOns, SessionMemory } from "../lib/patterns.js";
+import { TONE_LABEL } from "../lib/tone.js";
 import { createGraph, TOPIC_COLORS, TAG_COLORS } from "./graph.js";
 
 const $ = (id) => document.getElementById(id);
@@ -47,6 +42,7 @@ let listRows = [];       // 목록에 보이는 순서대로 댓글 인덱스
 let listActive = -1;     // 목록에서 강조한 댓글 인덱스
 let listSel = [];        // 지도에서 여러 개 고른 댓글 인덱스
 const memory = new SessionMemory();
+let topicCache = new Map(); // 세밀도 값 → 주제 나누기 결과 (분석마다 새로)
 
 $("ver").textContent = "v" + chrome.runtime.getManifest().version;
 if (fixedTab) $("btn-wide").hidden = true;
@@ -146,7 +142,15 @@ function setBusy(busy) {
   $("btn-cancel").disabled = false;
   if (!busy) refreshWeightsOption();
 }
-const yieldUI = () => new Promise((r) => setTimeout(r, 0));
+
+/** 분석 계산 (lib/pipeline.js). onStatus로 진행 문구를 받는다 */
+async function analyze(input, onStatus) {
+  const embed = async (texts, st) => {
+    const r = await semantic.semanticEmbed(texts, { model: input.mode, onStatus: st });
+    return { vecs: r.vecs, where: r.where, modelName: semantic.MODELS[r.model].name };
+  };
+  return analyzeComments(input, { embed, onStatus });
+}
 
 async function run(type, extra) {
   setBusy(true);
@@ -163,81 +167,25 @@ async function run(type, extra) {
     if (doc.meta.collection?.limited) notes.push("YouTube가 요청을 계속 받지 않아서(요청 제한이나 서버 오류) 중간에 멈추고, 모은 만큼만 분석했어요. 잠시 뒤 다시 모으면 더 받을 수 있어요");
 
     const n = comments.length;
-    const docText = `${doc.title}\n${doc.text}`.slice(0, 1500);
-    const t0 = performance.now();
-
-    // 1) 문구 비교 (복붙 의심용) — 댓글이 많으면 구역을 나눠 찾고, 중간중간 화면에 양보한다
-    setStatus(`문구 비교 중 (${num(n)}개)`, "busy");
-    await yieldUI();
-    const lexVecs = hashEmbed([docText, ...comments.map((c) => c.text)]).slice(1);
-    const lexNbrs = await neighborsFast(lexVecs, 8, { partition: kmeans, onProgress: (p) => setStatus(`문구 비교 중 ${Math.round(p * 100)}%`, "busy") });
-    const t1 = performance.now();
-
-    // 2) 뜻 분석 — "lol", "ㅋㅋ" 같은 짧은 반응은 뜻으로 묶을 수 없어 따로 모으고, 모델에도 넣지 않는다(시간 절약)
-    const short = comments.map((c) => isShortReaction(c.text));
-    const idx = [];
-    short.forEach((sh, i) => { if (!sh) idx.push(i); });
-    const subTexts = [docText, ...idx.map((i) => comments[i].text)];
-    let semAll = null, modelName = null, where = null;
     const mode = $("mode").value;
-    if (mode !== "fast" && semantic && idx.length) {
-      try {
-        const r = await semantic.semanticEmbed(subTexts, { model: mode, onStatus: (m) => setStatus(m, "busy") });
-        semAll = centerVectors(r.vecs); // 공통 성분을 빼서 댓글 사이 차이를 벌린다
-        where = r.where; modelName = semantic.MODELS[r.model].name;
-      } catch (e) {
-        console.warn("[WV] semantic failed", e);
-        notes.push(`의미 모델을 쓰지 못해 문구 기준으로 묶었어요 (${e.message})`);
-      }
-    }
-    const t2 = performance.now();
-
-    setStatus("지도 그리는 중", "busy");
-    await yieldUI();
-    // 3) 연속 지도: 이웃 그래프 → UMAP 배치 (본문도 점 하나로 함께 놓는다). 주제 묶기도 같은 그래프를 쓴다.
-    const all = semAll || hashEmbed(subTexts); // [본문, 짧은 반응을 뺀 댓글…]
-    const nb = await neighborsFast(all, 15, { partition: kmeans });
-    const fg = fuzzyGraph(nb); // 첫 배치(UMAP)용
-    const snn = snnGraph(nb);  // 주제 묶기·지도 선용 (PhenoGraph 방식 공유 이웃 가중치)
-    const { x: ux, y: uy } = umapLayout(all.length, fg, pca2(all));
-    toPixels(ux, uy);
-    const nodeOf = (local) => (local === 0 ? 0 : idx[local - 1] + 1); // 지도 점 번호: 0 = 본문, i+1 = 댓글 i
-    const X = new Array(n + 1).fill(0), Y = new Array(n + 1).fill(0);
-    let maxY = -Infinity, sumX = 0;
-    for (let l = 0; l < all.length; l++) { X[nodeOf(l)] = ux[l]; Y[nodeOf(l)] = uy[l]; maxY = Math.max(maxY, uy[l]); sumX += ux[l] / all.length; }
-    // 짧은 반응은 뜻으로 놓을 수 없어 지도 아래에 따로 모아 둔다 (좋아요 많은 순으로 가운데부터)
-    const shortIdx = [];
-    short.forEach((sh, i) => { if (sh) shortIdx.push(i); });
-    shortIdx.sort((p, q) => (comments[q].likes || 0) - (comments[p].likes || 0) || p - q);
-    const sr = 8 * Math.sqrt(shortIdx.length) + 10;
-    shortIdx.forEach((i, t) => {
-      const rad = sr * Math.sqrt((t + 0.5) / shortIdx.length), ang = t * 2.399963;
-      X[i + 1] = sumX + rad * Math.cos(ang); Y[i + 1] = (isFinite(maxY) ? maxY : 0) + sr + 60 + rad * Math.sin(ang);
-    });
-    const graphEdges = snn.map((e) => ({ a: nodeOf(e.a), b: nodeOf(e.b), w: e.w }));
-    const semNbrs = comments.map(() => []);
-    for (let l = 1; l < all.length; l++) semNbrs[idx[l - 1]] = nb[l].filter((q) => q.j !== 0).map(({ j, sim }) => ({ j: idx[j - 1], sim }));
-    const para = semAll
-      ? paraphraseGroups(semNbrs, (i, j) => dot(lexVecs[i], lexVecs[j]), comments)
-      : { groups: [], note: "의미 모델로 분석했을 때만 볼 수 있어요." };
-    const co = coActiveAuthors(comments);
-    const tone = toneSummary(comments);
-    const t3 = performance.now();
+    const A = await analyze({ doc, comments, useSemantic: mode !== "fast" && !!semantic, mode }, (m) => setStatus(m, "busy"));
+    notes.push(...A.notes);
 
     S = {
-      tabId: tab.id, doc, comments, lexVecs, lexNbrs, semNbrs, x: X, y: Y, graphEdges, idx, short, semantic: !!semAll, modelName, where,
-      para, co, tone: { tones: tone.tones, rows: tone.rows, topN: tone.topN },
+      tabId: tab.id, doc, comments, lexVecs: A.lexVecs, lexNbrs: A.lexNbrs, semNbrs: A.semNbrs, x: A.x, y: A.y, graphEdges: A.graphEdges,
+      idx: A.idx, short: A.short, semantic: A.semantic, modelName: A.modelName, where: A.where, para: A.para, co: A.co, tone: A.tone, presets: A.presets,
     };
+    topicCache = new Map([[FIRST_RES, A.firstTopics]]);
     memory.add(doc, comments);
     picked = -1; savedTags = null; V = null; mapMode = "comments";
     showResult();
-    setRes(50);
+    setRes(FIRST_RES);
     renderPresets();
     rebuild({ fresh: true });
     await checkVideo();
 
-    const sec = (a, b) => `${((b - a) / 1000).toFixed(1)}초`;
-    const parts = [`댓글 ${num(n)}개 분석 완료`, `문구 ${sec(t0, t1)}`, semAll ? `의미 ${sec(t1, t2)} (${where})` : null, `지도 ${sec(t2, t3)}`].filter(Boolean);
+    const sec = (ms) => `${(ms / 1000).toFixed(1)}초`;
+    const parts = [`댓글 ${num(n)}개 분석 완료`, `문구 ${sec(A.times.lex)}`, A.semantic ? `의미 ${sec(A.times.sem)} (${A.where})` : null, `지도 ${sec(A.times.map)}`].filter(Boolean);
     setStatus([parts.join(" / "), ...notes].join(" — "), notes.length ? "error" : "");
   } catch (e) {
     setStatus(e.message, "error");
@@ -291,9 +239,11 @@ function computeTopics() {
   const n = comments.length;
   const v = Number($("res-range").value) || 0;
   if (V?.topicKey === v) return V.topicPart;
-  const texts = comments.map((c) => c.text);
-  const part = topicPartition({ n, graphEdges, short, texts, resolution: resolutionOf(v) });
-  const { ids, groups, keywords: kws, ov } = part;
+  if (!topicCache.has(v)) topicCache.set(v, topicsAt({ n, graphEdges, short, texts: comments.map((c) => c.text) }, v));
+  if (topicCache.size > 12) topicCache.delete(topicCache.keys().next().value);
+  const part = topicCache.get(v);
+  const { groups, keywords: kws, ov } = part;
+  const ids = Int32Array.from(part.ids); // 아래에서 짧은 반응 번호를 채우므로 캐시는 그대로 둔다
   const K = groups.length;
   const extraOf = Array.from({ length: n }, (_, i) => ov.extra[i + 1]);
   const extraIn = (c) => (ov.members.get(c) || []).map((k) => k - 1).filter((i) => ids[i] !== c);
@@ -487,13 +437,11 @@ function renderSummary() {
 
 // ---------- 주제 세밀도 ----------
 function renderPresets() {
-  const presets = [["크게", 20], ["보통", 50], ["잘게", 75], ["아주 잘게", 100]];
-  const n = S.comments.length;
-  $("presets").replaceChildren(...presets.map(([label, v]) => {
+  S.presets ||= presetCounts(S.comments.length, S.graphEdges);
+  $("presets").replaceChildren(...S.presets.map(([label, v, cnt]) => {
     const b = el("button");
     b.type = "button";
     b.dataset.value = v;
-    const cnt = louvain(n + 1, S.graphEdges, { resolution: resolutionOf(v), minSize: Math.max(3, Math.round(n / 200)) }).sizes.filter((x) => x >= 3).length;
     b.append(el("span", "", label), el("small", "", `약 ${cnt}개`));
     b.onclick = () => { setRes(v); rebuild(); };
     return b;
@@ -743,14 +691,9 @@ function renderTone() {
     return tr;
   });
   $("tone-table").replaceChildren(head, ...body);
-  const texts = S.comments.map((c) => c.text);
-  const words = (label) => {
-    const idx = rows.find((r) => r.label === label).indices;
-    if (idx.length < 5) return "댓글이 적어 보여주지 않아요.";
-    return topicKeywords([idx], texts, { k: 10 })[0].join(", ") || "뚜렷한 낱말이 없어요.";
-  };
-  $("tone-words-c").textContent = words("condemn");
-  $("tone-words-p").textContent = words("praise");
+  S.tone.words ||= toneWords(rows, S.comments.map((c) => c.text));
+  $("tone-words-c").textContent = S.tone.words.condemn;
+  $("tone-words-p").textContent = S.tone.words.praise;
 }
 
 function renderCross() {
@@ -976,7 +919,7 @@ async function restoreFromPanel() {
     S = snap.S;
     S.lexVecs = snap.lexVecs ? unpackVectors(snap.lexVecs) : null;
     tagDefs = snap.tagDefs;
-    picked = -1; V = null; shown = null; mapMode = "comments";
+    picked = -1; V = null; shown = null; mapMode = "comments"; topicCache = new Map();
     memory.add(S.doc, S.comments);
     showResult();
     setRes(Number(snap.res));

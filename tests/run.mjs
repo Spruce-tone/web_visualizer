@@ -1123,4 +1123,44 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.ok(!sem.MODELS.qwen3.cpuFallback && !sem.MODELS.gemma.cpuFallback, "재지 않은 모델은 대체하지 않음");
 }
 
+// 분석 계산 한곳 (lib/pipeline.js): Worker와 메인 대체 경로가 같은 함수를 쓴다
+{
+  const P = await import("../lib/pipeline.js");
+  const { koreanTopics } = await import("./ko-topics.mjs");
+  const ko = koreanTopics({ seed: 3 });
+  const pComments = ko.texts.map((text, i) => ({ id: "k" + i, parentId: i % 9 === 4 ? "k" + (i - 1) : null, author: "u" + (i % 97), authorId: "@u" + (i % 97), text, likes: (i * 13) % 50, createdAtRaw: "1일 전", createdAtApprox: new Date(Date.parse("2026-11-20") + i * 6e4).toISOString() }));
+  pComments.push({ id: "s1", parentId: null, author: "x", authorId: "@x", text: "ㅋㅋ", likes: 0, createdAtRaw: "", createdAtApprox: null });
+  const pDoc = { title: "점검", text: "설명" };
+  const fakeEmbed = async (texts) => ({ vecs: (await import("../lib/embed/hash.js")).hashEmbed(texts, { dim: 128 }), where: "CPU", modelName: "가짜" });
+  const statuses = [];
+  const A = await P.analyzeComments({ doc: pDoc, comments: pComments, useSemantic: true }, { embed: fakeEmbed, onStatus: (m) => statuses.push(m), pause: async () => {} });
+  const B = await P.analyzeComments({ doc: pDoc, comments: structuredClone(pComments), useSemantic: true }, { embed: fakeEmbed });
+  const strip = (r) => ({ ...r, times: null });
+  assert.deepEqual(strip(A), strip(B), "같은 입력이면 같은 결과 (양보 방식과 상관없이)");
+  assert.equal(A.semantic, true); assert.equal(A.modelName, "가짜");
+  assert.equal(A.x.length, pComments.length + 1);
+  assert.equal(A.short[pComments.length - 1], true);
+  assert.ok(statuses[0].startsWith("문구 비교 중") && statuses.includes("지도 그리는 중"));
+  // Worker로 넘길 수 있는 값만 (structuredClone 그대로 같음)
+  assert.deepEqual(structuredClone(strip(A)), strip(A));
+  // 첫 주제·세밀도 단추·평가 낱말은 따로 계산한 것과 같다
+  const texts = pComments.map((c) => c.text);
+  assert.deepEqual(A.firstTopics, P.topicsAt({ n: pComments.length, graphEdges: A.graphEdges, short: A.short, texts }, P.FIRST_RES));
+  assert.deepEqual(A.presets, P.presetCounts(pComments.length, A.graphEdges));
+  assert.deepEqual(A.presets.map((p) => p[1]), [20, 50, 75, 100]);
+  assert.deepEqual(A.tone.words, P.toneWords(A.tone.rows, texts));
+  // 의미 모델이 실패하면 문구 기준 + 안내
+  const C = await P.analyzeComments({ doc: pDoc, comments: pComments, useSemantic: true }, { embed: async () => { throw new Error("없음"); }, pause: async () => {} });
+  assert.equal(C.semantic, false); assert.match(C.notes[0], /문구 기준/);
+  const D = await P.analyzeComments({ doc: pDoc, comments: pComments, useSemantic: false }, { pause: async () => {} });
+  assert.deepEqual(strip(C).graphEdges, D.graphEdges, "실패 시 결과는 문구만으로 분석한 것과 같다");
+  // 벡터 펴기/나눠 보기
+  const fv = P.flattenVectors(A.lexVecs);
+  const back = P.viewVectors(fv);
+  assert.equal(back.length, A.lexVecs.length);
+  assert.deepEqual(Array.from(back[5]), Array.from(A.lexVecs[5]));
+  assert.equal(back[5].buffer, fv.flat.buffer, "복사하지 않는다");
+  assert.deepEqual(P.viewVectors(P.flattenVectors([])), []);
+}
+
 console.log("all tests passed");
