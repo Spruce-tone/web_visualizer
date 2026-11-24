@@ -214,6 +214,8 @@ const snap = JSON.parse(JSON.stringify(api.snapshot()));
 assert.equal(snap.S.comments.length, comments.length);
 assert.equal(snap.pos.x.length, comments.length + 1);
 assert.equal(snap.S.x.length, comments.length + 1, "지도 좌표도 함께 넘어감");
+assert.equal(snap.lexVecs.n, comments.length, "문구 벡터도 함께 넘어감 (복붙 묶음의 평균 유사도 계산용)");
+assert.equal(snap.S.lexVecs, undefined, "벡터는 S 안에 Float32Array로 넘기지 않는다");
 
 // 6) 댓글 위치로 이동: 답글이면 원댓글 id도 함께 보낸다
 api.showDetail(replyIdx);

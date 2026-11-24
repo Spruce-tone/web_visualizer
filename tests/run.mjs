@@ -897,4 +897,32 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(p.ov.extra.length, 10, "겹침은 점 번호 기준(본문 포함)");
 }
 
+// ---- 복붙 의심: 평균 유사도는 묶음 안 모든 쌍으로 (사슬처럼 이어진 짧은 응원은 같은 문구가 아님) ----
+{
+  const { pairMean } = await import("../lib/signals.js");
+  const run = (list) => {
+    const V = hashEmbed(list.map((c) => c.text));
+    const ed = edgesFromNeighbors(topKNeighbors(V, 8), 0.6);
+    const cl = clustersFromEdges(list.length, ed);
+    const sim = (i, j) => dot(V[i], V[j]);
+    return { withSim: clusterSignals(cl.groups, list, ed, { sim }), edgeOnly: clusterSignals(cl.groups, list, ed), V, cl };
+  };
+  // 사슬: 이웃끼리만 한 낱말씩 겹치는 서로 다른 응원 (실제 뮤직비디오 댓글 모양을 본뜸)
+  const W = ["queen", "iconic", "mother", "slay", "legend", "goddess", "vocals", "visual", "comeback", "stream", "forever", "bestgirl", "superstar", "angel"];
+  const chain = W.slice(0, -3).map((w, i) => mk(`${w} ${W[i + 1]} ${W[i + 2]} ${W[i + 3]}`, "c" + i)); // 이웃끼리 세 낱말, 두 칸 건너면 두 낱말…
+  const r = run(chain);
+  assert.equal(r.cl.groups[0].length, 11, "사슬이 한 묶음으로 이어진다");
+  assert.equal(r.edgeOnly[0].state, "scored", "(예전) 이어진 쌍만 보면 점수를 낸다");
+  assert.ok(r.withSim[0].meanSim < 0.6, "묶음 전체 평균 유사도는 낮다");
+  assert.equal(r.withSim[0].state, "natural", "사슬 묶음은 점수를 받지 않는다");
+  // 같은 긴 문구를 여러 작성자가 그대로 쓰면 여전히 점수
+  const copy = Array.from({ length: 6 }, (_, i) => mk("이 영상 꼭 끝까지 보세요 진실이 다 나옵니다 주변에 널리 퍼뜨려 주세요", "p" + i));
+  copy.push(mk("오늘 점심은 김치찌개를 먹었는데 맛있었다", "q1"), mk("편집이 깔끔해서 보기 좋네요 자막도 좋고요", "q2"));
+  const rc = run(copy);
+  assert.ok(rc.withSim.some((x) => x.state === "scored" && x.score >= DEFAULT_WEIGHTS.thresholds.flag && x.size === 6), "그대로 복사한 묶음은 점수를 받는다");
+  // 결정적: 큰 묶음(표본 추출)도 같은 입력이면 같은 값
+  const g = Array.from({ length: 200 }, (_, i) => i), f2 = (i, j) => ((i * 31 + j * 17) % 100) / 100;
+  assert.equal(pairMean(g, f2), pairMean(g, f2));
+}
+
 console.log("all tests passed");

@@ -5,7 +5,7 @@
 // - 의미 임베딩(자동 선택): 지도 배치, 주제 묶음, '같은 주장 다른 표현'
 // - 평가 표현(어조): 설명용 탭과 색칠에만. 점수·배치에는 쓰지 않는다
 import { hashEmbed } from "../lib/embed/hash.js";
-import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast } from "../lib/vec.js";
+import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast, packVectors, unpackVectors } from "../lib/vec.js";
 import { kmeans, isShortReaction } from "../lib/cluster.js";
 import { fuzzyGraph, umapLayout, toPixels } from "../lib/umap.js";
 import { louvain, snnGraph } from "../lib/community.js";
@@ -224,7 +224,7 @@ async function run(type, extra) {
     const t3 = performance.now();
 
     S = {
-      tabId: tab.id, doc, comments, lexNbrs, semNbrs, x: X, y: Y, graphEdges, idx, short, semantic: !!semAll, modelName, where,
+      tabId: tab.id, doc, comments, lexVecs, lexNbrs, semNbrs, x: X, y: Y, graphEdges, idx, short, semantic: !!semAll, modelName, where,
       para, co, tone: { tones: tone.tones, rows: tone.rows, topN: tone.topN },
     };
     memory.add(doc, comments);
@@ -269,7 +269,7 @@ function computeLex() {
   const n = comments.length;
   const lexEdges = edgesFromNeighbors(lexNbrs, thLex);
   const lex = clustersFromEdges(n, lexEdges);
-  const signals = clusterSignals(lex.groups, comments, lexEdges, { weights, doc });
+  const signals = clusterSignals(lex.groups, comments, lexEdges, { weights, doc, sim: S.lexVecs ? (i, j) => dot(S.lexVecs[i], S.lexVecs[j]) : null });
   const flagged = new Set(signals.filter((s) => s.state === "scored" && s.score >= weights.thresholds.flag).flatMap((s) => s.indices));
   const feats = authorFeatures(comments, lex.ids, lex.groups);
   const aSignals = authorSignals(feats, { weights });
@@ -960,9 +960,9 @@ function renderTags(counts = []) {
 function snapshot() {
   if (shown === "comments") savedTags = Array.from(graph.tagsArray());
   const L = V?.commentLayout;
-  const { names, ...plain } = S; // Map은 넘기지 않는다
+  const { names, lexVecs, ...plain } = S; // Map은 넘기지 않는다. 벡터는 문자열 하나로 묶어 넘긴다
   return {
-    S: plain, tagDefs,
+    S: plain, lexVecs: lexVecs ? packVectors(lexVecs) : null, tagDefs,
     res: $("res-range").value, thLex: $("th-lex").value,
     tags: savedTags,
     pos: L ? { x: Array.from(L.x), y: Array.from(L.y), pin: Array.from(L.pin) } : null,
@@ -973,6 +973,7 @@ async function restoreFromPanel() {
     const snap = await chrome.runtime.sendMessage({ type: "WV_STATE_REQUEST", tabId: fixedTab });
     if (!snap?.S) return;
     S = snap.S;
+    S.lexVecs = snap.lexVecs ? unpackVectors(snap.lexVecs) : null;
     tagDefs = snap.tagDefs;
     picked = -1; V = null; shown = null; mapMode = "comments";
     memory.add(S.doc, S.comments);
