@@ -8,7 +8,7 @@
 // wv-navigate      (예비): YouTube 내부 이동(yt-navigate). 영상이 다시 불러와지고 광고가 나올 수 있어 기본으로 쓰지 않는다.
 (() => {
   // 다리 판(版). 고칠 때마다 올린다: 업데이트 전에 열린 탭에는 옛 다리가 남아 있으므로, 이벤트 이름에 판을 붙여 옛 다리가 새 부탁에 답하지 않게 한다.
-  const V = 2;
+  const V = 3;
   if (window.__wvBridgeV === V) return;
   window.__wvBridgeV = V;
 
@@ -18,9 +18,9 @@
   const ack = (name, detail) => document.dispatchEvent(new CustomEvent(name, { detail }));
   const waitFor = async (fn, ms) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v || Date.now() > end) return v; await new Promise((r) => setTimeout(r, 200)); } };
 
-  // 토큰 고르기는 content/parse.js(WV.findCommentToken, 테스트 있음). 패널이 댓글을 열 때마다 parse.js를 메인 월드에 먼저 넣으므로
+  // 토큰 고르기는 content/parse.js(__wvParse.findCommentToken, 테스트 있음). 패널이 댓글을 열 때마다 parse.js를 메인 월드에 먼저 넣으므로
   // 부를 때 찾는다. (manifest로는 넣을 수 없음: 같은 파일이 isolated 항목에도 있으면 메인 월드 쪽은 들어가지 않았다 — Edge 실측)
-  const findCommentToken = (j) => (typeof window.WV?.findCommentToken === "function" ? window.WV.findCommentToken(j) : undefined);
+  const findCommentToken = (j) => (typeof window.__wvParse?.findCommentToken === "function" ? window.__wvParse.findCommentToken(j) : undefined);
 
   document.addEventListener(`wv-show-comment-v${V}`, async (ev) => {
     let result = "error";

@@ -1,5 +1,8 @@
-// 공통 파싱 유틸 (content script 전역). 사이트 어댑터들이 공유한다.
-var WV = (globalThis.WV = globalThis.WV || {});
+// 공통 파싱 유틸. 사이트 어댑터들이 공유한다.
+// 전역에는 __wvParse 하나만 둔다: 이 파일은 페이지(메인 월드)에도 들어가므로(page-bridge.js가 findCommentToken을 씀)
+// 페이지 자체 코드의 전역(예: WV)과 부딪히지 않게 이름을 드물게 하고, 나머지는 함수 안에 가둔다.
+(() => {
+const WV = (globalThis.__wvParse = globalThis.__wvParse || {});
 
 /** "1.2천", "3.4만", "1.2K", "3M", "" → 숫자 */
 WV.parseCount = function (raw) {
@@ -196,3 +199,4 @@ WV.findCommentToken = function (obj) {
 
 WV.text = (el) => (el ? el.textContent.replace(/\s+/g, " ").trim() : "");
 WV.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+})();

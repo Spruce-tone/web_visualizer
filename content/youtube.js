@@ -1,6 +1,7 @@
 // YouTube 어댑터: DOM → 공통 스키마(Doc, Comment[])
 // 선택자는 YouTube 개편 시 깨질 수 있으므로 이 파일에만 모아둔다.
 (function () {
+  const WV = globalThis.__wvParse; // content/parse.js
   // 다시 주입될 수 있다(확장을 새로 고친 뒤 영상 탭을 새로고침하지 않은 경우 등).
   // 예전에는 '이미 있음' 표시만 보고 그냥 끝내서, 죽은 옛 리스너만 남아 응답이 없었다 → 옛 리스너를 떼고 새로 단다.
   try { if (globalThis.__WV_YT_LISTENER__) chrome.runtime.onMessage.removeListener(globalThis.__WV_YT_LISTENER__); } catch { /* 옛 문맥이 이미 무효 */ }
@@ -332,7 +333,7 @@
   window.addEventListener("hashchange", devOpen);
   devOpen();
 
-  const BRIDGE_V = 2; // content/page-bridge.js 의 V와 같아야 한다 (tests/run.mjs가 검사)
+  const BRIDGE_V = 3; // content/page-bridge.js 의 V와 같아야 한다 (tests/run.mjs가 검사)
   /** 페이지 쪽 다리(page-bridge.js)에 부탁하고 답을 기다린다. 다리가 없으면 "timeout". */
   function askBridge(name, payload, timeoutMs) {
     return new Promise((resolve) => {

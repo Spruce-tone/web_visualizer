@@ -9,7 +9,8 @@ const ctx = { globalThis: {}, setTimeout, btoa, atob, URL };
 ctx.globalThis = ctx;
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(new URL("../content/parse.js", import.meta.url), "utf8"), ctx);
-const WV = ctx.WV;
+const WV = ctx.__wvParse;
+assert.equal(ctx.WV, undefined, "parse.js는 전역에 WV를 만들지 않는다 (메인 월드 충돌 방지)");
 
 assert.equal(WV.parseCount("1.2천"), 1200);
 assert.equal(WV.parseCount("3.4만"), 34000);
