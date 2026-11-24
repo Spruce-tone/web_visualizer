@@ -544,7 +544,11 @@ function item({ key, color, title, meta, score, state, sample, samples, parts, w
     focusKey = on ? key : null;
     const nodeIdx = indices.map((i) => i + 1);
     graph.focus(on ? new Set([0, ...nodeIdx]) : null);
-    if (on) graph.select(nodeIdx, { tagOnly: tagIndices?.map((i) => i + 1) }); else graph.clearSelection(); // 고른 묶음을 바로 '내 분류'에 담을 수 있게 (주제는 주 주제 댓글만 담김)
+    // 고른 묶음을 바로 '내 분류'에 담을 수 있게 (주제는 주 주제 댓글만 담김).
+    // 주제를 누른 경우엔 목록이 그 주제가 되므로, 같은 내용의 '지도에서 고른 댓글' 항목을 만들지 않는다.
+    selFromTopic = on && !!list;
+    try { if (on) graph.select(nodeIdx, { tagOnly: tagIndices?.map((i) => i + 1) }); else graph.clearSelection(); }
+    finally { selFromTopic = false; }
     if (on && list) setList(list); // 주제를 누르면 댓글 목록도 그 주제로
     document.querySelectorAll(".item").forEach((x) => x.classList.remove("active"));
     if (on) li.classList.add("active");
@@ -677,9 +681,12 @@ function pickFromList(i) {
   renderRows();
 }
 /** 지도에서 여러 개를 고르면(Shift+드래그, 키워드 누르기 등) 목록에 '지도에서 고른 댓글'이 생긴다 */
+let selFromTopic = false; // 주제 목록에서 주제를 눌러 고른 중 (목록은 그 주제로 바뀜)
 function listFromSelection(sel) {
   if (!S || !V || shown !== "comments") return;
-  if (sel.length > 1) {
+  if (sel.length > 1 && selFromTopic) { // 주제와 같은 내용이므로 '고른 댓글' 항목을 거둔다
+    if (listSel.length) { listSel = []; renderListOptions(); }
+  } else if (sel.length > 1) {
     listSel = sel.filter((n) => n > 0).map((n) => n - 1);
     renderListOptions();
     setList("sel");

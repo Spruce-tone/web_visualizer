@@ -62,6 +62,10 @@ globalThis.chrome = {
 
 let api = null;
 globalThis.__WV_TEST__ = (a) => (api = a);
+// 주제 목록 줄과 목록 드롭다운 항목을 붙잡아 둔다 (가짜 요소라 화면에는 안 남음)
+let topicLis = [], listOpts = [];
+byId("topics").replaceChildren = (...k) => { topicLis = k; };
+byId("clist-topic").replaceChildren = (...k) => { listOpts = k; };
 await import("../sidepanel/sidepanel.js");
 assert.ok(api, "패널 스크립트가 끝까지 실행됨");
 await new Promise((r) => setTimeout(r, 50)); // 모델·가중치 초기화 대기
@@ -153,6 +157,13 @@ assert.equal(V.commentLayout.x[1], mx + 40);
   api.listFromSelection([1, 2, 3]);
   api.listFromSelection([]);
   assert.notEqual(api.state().listSrc, "sel", "고른 것을 풀면 주제 목록으로 돌아간다");
+  // 주제 탭에서 주제를 누르면 목록이 그 주제가 되고, 같은 내용의 '지도에서 고른 댓글' 항목은 남지 않는다
+  api.listFromSelection([1, 2, 3]);
+  assert.ok(listOpts.some((o) => o.value === "sel"));
+  topicLis[0].onclick();
+  assert.equal(api.state().listSrc, "t" + st.V.topics[0].cluster, "주제를 누르면 목록이 그 주제로");
+  assert.ok(!listOpts.some((o) => o.value === "sel"), "주제를 눌렀을 때 '지도에서 고른 댓글' 항목이 생기지 않는다");
+  topicLis[0].onclick(); // 다시 눌러 풂
   // 지도 필터를 목록도 따른다
   const big = st.V.topics.find((t) => t.members.some((i) => comments[i].parentId) && t.members.some((i) => !comments[i].parentId)) || st.V.topics[0];
   api.setList("t" + big.cluster);
