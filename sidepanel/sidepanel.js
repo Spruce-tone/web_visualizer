@@ -8,7 +8,8 @@ import { hashEmbed } from "../lib/embed/hash.js";
 import { dot, edgesFromNeighbors, clustersFromEdges, pca2, centerVectors, neighborsFast } from "../lib/vec.js";
 import { kmeans, isShortReaction } from "../lib/cluster.js";
 import { fuzzyGraph, umapLayout, toPixels } from "../lib/umap.js";
-import { louvain, snnGraph, overlapTopics, mergeSameKeywordTopics } from "../lib/community.js";
+import { louvain, snnGraph } from "../lib/community.js";
+import { topicPartition, resolutionOf } from "../lib/topics.js";
 import { createLayout, thinEdges } from "../lib/layout.js";
 import { timeHistogram } from "../lib/analyze.js";
 import { clusterSignals } from "../lib/signals.js";
@@ -248,8 +249,6 @@ function setSlider(id, v) {
   $(id + "-val").textContent = Number(v).toFixed(2);
 }
 
-/** 세밀도 슬라이더(0~100) → Louvain resolution(0.25~4). 50이 보통(1.0) */
-const resolutionOf = (v) => 0.25 * Math.pow(16, v / 100);
 function setRes(v) {
   const x = Math.max(0, Math.min(100, Math.round(v)));
   $("res-range").value = x;
@@ -286,24 +285,10 @@ function computeTopics() {
   const n = comments.length;
   const v = Number($("res-range").value) || 0;
   if (V?.topicKey === v) return V.topicPart;
-  const lv = louvain(n + 1, graphEdges, { resolution: resolutionOf(v), minSize: Math.max(3, Math.round(n / 200)) });
-  let ids = Int32Array.from({ length: n }, (_, i) => (short[i] ? -1 : lv.ids[i + 1]));
   const texts = comments.map((c) => c.text);
-  const groupsOf = (arr) => { const g = []; arr.forEach((c, i) => { if (c >= 0) (g[c] ||= []).push(i); }); return g.map((x) => x || []); };
-  // 키워드가 같고 서로 이어진 주제는 합친다 (점 번호 기준: 0 = 본문, i+1 = 댓글 i)
-  const mg = mergeSameKeywordTopics(Int32Array.from({ length: n + 1 }, (_, k) => (k === 0 ? -1 : ids[k - 1])), graphEdges,
-    (pt) => topicKeywords(groupsOf(Array.from(pt.subarray(1))), texts, { k: 4 }), { resolution: resolutionOf(v) });
-  ids = Int32Array.from(mg.ids.subarray(1));
-  let groups = groupsOf(ids), kws;
-  // 큰 묶음부터 번호를 다시 매긴다
-  const order = groups.map((g, c) => [c, g.length]).filter(([, s2]) => s2 > 0).sort((p, q) => q[1] - p[1] || p[0] - q[0]);
-  const rank = new Map(order.map(([c], r) => [c, r]));
-  ids = ids.map((c) => (c >= 0 ? rank.get(c) : -1));
-  groups = groupsOf(ids);
-  kws = topicKeywords(groups, texts, { k: 4 }); // 키워드는 주 주제 기준 (보조로 들어온 댓글이 키워드를 흐리지 않게)
+  const part = topicPartition({ n, graphEdges, short, texts, resolution: resolutionOf(v) });
+  const { ids, groups, keywords: kws, ov } = part;
   const K = groups.length;
-  // 겹침: 이웃 그래프에서 다른 주제와도 강하게 이어진 댓글은 그 주제에도 넣는다 (지도 위치·색은 주 주제 그대로)
-  const ov = overlapTopics(Int32Array.from({ length: n + 1 }, (_, k) => (k === 0 ? -1 : ids[k - 1])), graphEdges);
   const extraOf = Array.from({ length: n }, (_, i) => ov.extra[i + 1]);
   const extraIn = (c) => (ov.members.get(c) || []).map((k) => k - 1).filter((i) => ids[i] !== c);
   // 대표 댓글: 같은 주제의 이웃과 가장 강하게 이어진 댓글
@@ -324,7 +309,7 @@ function computeTopics() {
   const sIdx = [];
   short.forEach((sh, i) => { if (sh) { sIdx.push(i); ids[i] = K; } });
   if (sIdx.length) { const t = summarize(sIdx, K, ["짧은 반응"], true); t.extra = 0; t.members = sIdx; topics.push(t); }
-  return { topicKey: v, topic: { ids }, merges: mg.merges, extraOf, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), K };
+  return { topicKey: v, topic: { ids }, merges: part.merges, extraOf, topics, kwByCluster: new Map(topics.map((t) => [t.cluster, t.keywords])), K };
 }
 
 /** 기준이 바뀌면 필요한 쪽만 다시 계산. 손으로 옮긴 점과 내 분류는 유지한다. */

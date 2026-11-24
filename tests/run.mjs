@@ -879,4 +879,21 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(WV.findCommentToken(null), null);
 }
 
+// ---- 주제 나누기 한곳 (lib/topics.js, 패널·검증 스크립트 공용) ----
+{
+  const { topicPartition, resolutionOf } = await import("../lib/topics.js");
+  assert.equal(resolutionOf(50), 1);
+  // 점 0 = 본문, 1..9 = 댓글 0..8. 댓글 0~4 한 무리(5개), 5~7 한 무리(3개), 8 = 짧은 반응
+  const E = [];
+  const clique = (arr) => { for (let p = 0; p < arr.length; p++) for (let q = p + 1; q < arr.length; q++) E.push({ a: arr[p] + 1, b: arr[q] + 1, w: 1 }); };
+  clique([0, 1, 2, 3, 4]); clique([5, 6, 7]); E.push({ a: 5, b: 6, w: 0.05 });
+  const texts = ["사과 맛있다", "사과 달다", "사과 최고", "사과 좋다", "사과 사자", "배 시원", "배 좋다", "배 달다", "ㅋㅋ"];
+  const short = texts.map((_, i) => i === 8);
+  const p = topicPartition({ n: 9, graphEdges: E, short, texts, resolution: 1 });
+  assert.deepEqual(Array.from(p.ids), [0, 0, 0, 0, 0, 1, 1, 1, -1], "큰 주제가 0번, 짧은 반응은 -1");
+  assert.deepEqual(p.groups.map((g) => g.length), [5, 3]);
+  assert.equal(p.keywords[0][0], "사과");
+  assert.equal(p.ov.extra.length, 10, "겹침은 점 번호 기준(본문 포함)");
+}
+
 console.log("all tests passed");
