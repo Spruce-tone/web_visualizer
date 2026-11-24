@@ -330,7 +330,7 @@ function rebuild({ fresh = false, restore = null } = {}) {
   if (!S) return;
   const { comments } = S;
   const prev = fresh ? null : V;
-  if (fresh) { V = null; listSrc = null; listSel = []; listActive = -1; }
+  if (fresh) { V = null; listSrc = null; listSel = []; listActive = -1; listRows = []; } // 새 분석·크게 보기 넘겨받기: 이전 영상의 목록 번호를 쓰지 않게
   const lexPart = computeLex();
   const topicPart = computeTopics();
   const indexById = new Map(comments.map((c, i) => [c.id, i]));
@@ -629,6 +629,7 @@ function renderRows() {
   const out = [];
   for (let r = first; r < last; r++) {
     const i = listRows[r], c = S.comments[i];
+    if (!c) continue;
     const row = el("div", "crow" + (i === listActive ? " active" : ""));
     row.style.top = `${r * ROW}px`;
     row.style.setProperty("--c", topicColor(V.topic.ids[i]));

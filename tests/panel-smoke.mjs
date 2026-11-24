@@ -228,10 +228,20 @@ assert.equal(sent.filter((m) => m.type === "WV_FOCUS").length, 0, "다른 영상
 await api.checkVideo();
 assert.equal(byId("video-changed").hidden, false, "영상이 바뀌면 안내 띠가 보임");
 
-// 7) 같은 창에서 두 번째 영상 분석 → 영상 간 교차 계산 경로
+// 7) 같은 창에서 두 번째 영상(댓글이 더 적음) 분석 → 영상 간 교차 계산 경로
+//    목록이 이전 영상의 큰 번호를 가리키고 있어도 새 분석이 끝까지 그려져야 한다
+{
+  const st = api.state();
+  const far = st.V.topics.find((t) => t.members.some((i) => i >= 40));
+  api.setList("t" + far.cluster);
+  assert.ok(api.state().listRows.some((i) => i >= 40));
+}
 fixture.doc.meta.videoId = "OTHER"; fixture.doc.title = "두 번째 영상";
+fixture.comments = comments.slice(0, 40);
 await byId("btn-all").onclick();
-assert.ok(String(byId("status").textContent).includes("분석 완료"));
+assert.ok(String(byId("status").textContent).includes("분석 완료"), `두 번째 분석이 끝까지: ${byId("status").textContent}`);
+assert.equal(api.state().S.comments.length, 40);
+assert.ok(api.state().listRows.every((i) => i < 40), "목록은 새 영상의 댓글만");
 assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안내 띠가 사라짐");
 
 console.log("panel smoke passed");
