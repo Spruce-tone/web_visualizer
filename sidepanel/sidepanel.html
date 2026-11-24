@@ -158,6 +158,21 @@
     </div>
 
     <div class="side-col">
+      <section class="clist" id="clist" aria-label="댓글 목록">
+        <div class="clist-head">
+          <span class="label">댓글 목록</span>
+          <span id="clist-count" class="value"></span>
+        </div>
+        <div class="clist-tools">
+          <select id="clist-topic" class="chip-select" aria-label="목록에 보일 주제"></select>
+          <select id="clist-sort" class="chip-select" aria-label="목록 순서">
+            <option value="likes">좋아요 많은 순</option>
+            <option value="new">최근 순</option>
+          </select>
+        </div>
+        <div id="clist-scroll" class="clist-scroll" tabindex="0"><div id="clist-pad" class="clist-pad"></div></div>
+        <p class="note">댓글을 누르면 지도에서 그 점으로 갑니다. 지도에서 점을 누르면 여기서 그 댓글을 찾아 보여 줘요.</p>
+      </section>
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="topics" aria-selected="true">주제 <span id="n-topics" class="count"></span></button>
         <button role="tab" data-tab="signals">복붙 의심 <span id="n-signals" class="count"></span></button>

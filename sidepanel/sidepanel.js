@@ -40,6 +40,11 @@ let semantic = null;
 let weights = DEFAULT_WEIGHTS;
 let calibrated = null;
 let finding = false;
+// 댓글 목록 (주제별)
+let listSrc = null;      // 지금 목록의 출처: "t<주제 번호>" | "sel"(지도에서 여러 개 고름)
+let listRows = [];       // 목록에 보이는 순서대로 댓글 인덱스
+let listActive = -1;     // 목록에서 강조한 댓글 인덱스
+let listSel = [];        // 지도에서 여러 개 고른 댓글 인덱스
 const memory = new SessionMemory();
 
 $("ver").textContent = "v" + chrome.runtime.getManifest().version;
@@ -48,10 +53,10 @@ if (fixedTab) $("btn-wide").hidden = true;
 const graph = createGraph($("graph"), $("tooltip"), {
   onPick: (i) => {
     if (shown === "authors") showAuthor(i);
-    else showDetail(i > 0 ? i - 1 : -1);
+    else { showDetail(i > 0 ? i - 1 : -1); revealInList(i > 0 ? i - 1 : -1); }
   },
   onTagsChange: (counts) => renderTags(counts),
-  onSelectionChange: (sel) => ($("sel-count").textContent = `선택 ${num(sel.length)}개`),
+  onSelectionChange: (sel) => { $("sel-count").textContent = `선택 ${num(sel.length)}개`; listFromSelection(sel); },
 });
 
 // ---------- 상태 표시 ----------
@@ -321,7 +326,7 @@ function rebuild({ fresh = false, restore = null } = {}) {
   if (!S) return;
   const { comments } = S;
   const prev = fresh ? null : V;
-  if (fresh) V = null;
+  if (fresh) { V = null; listSrc = null; listSel = []; listActive = -1; }
   const lexPart = computeLex();
   const topicPart = computeTopics();
   const indexById = new Map(comments.map((c, i) => [c.id, i]));
@@ -337,6 +342,8 @@ function rebuild({ fresh = false, restore = null } = {}) {
   drawMap({ fresh });
   renderSummary();
   renderTopics();
+  renderListOptions();
+  setList(listSrc, { keepScroll: !fresh });
   renderSignals();
   renderPatterns();
   renderAuthors();
@@ -352,7 +359,7 @@ function drawMap({ fresh = false } = {}) {
   if (!S || !V) return;
   if (shown === "comments" && !fresh) savedTags = Array.from(graph.tagsArray());
   const authors = mapMode === "authors";
-  for (const id of ["grain", "cats", "color-by-wrap", "filter"]) $(id).hidden = authors;
+  for (const id of ["grain", "cats", "color-by-wrap", "filter", "clist"]) $(id).hidden = authors;
   $("links-on").parentElement.hidden = authors;
   $("labels-on").parentElement.hidden = authors;
   document.querySelectorAll("#map-mode button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mapMode)));
@@ -511,7 +518,7 @@ function stepTopics(delta) {
 }
 
 // ---------- 목록 ----------
-function item({ key, color, title, meta, score, state, sample, samples, parts, why, indices }) {
+function item({ key, color, title, meta, score, state, sample, samples, parts, why, indices, list }) {
   const li = el("li", "item");
   if (color) li.style.setProperty("--c", color);
   const row = el("div", "row");
@@ -536,6 +543,7 @@ function item({ key, color, title, meta, score, state, sample, samples, parts, w
     const nodeIdx = indices.map((i) => i + 1);
     graph.focus(on ? new Set([0, ...nodeIdx]) : null);
     if (on) graph.select(nodeIdx); else graph.clearSelection(); // 고른 묶음을 바로 '내 분류'에 담을 수 있게
+    if (on && list) setList(list); // 주제를 누르면 댓글 목록도 그 주제로
     document.querySelectorAll(".item").forEach((x) => x.classList.remove("active"));
     if (on) li.classList.add("active");
   };
@@ -550,12 +558,121 @@ function renderTopics() {
   fill("topics", V.topics.map((t) => item({
     key: "t" + t.cluster,
     color: t.short ? "#8D98AB" : TOPIC_COLORS[t.cluster % TOPIC_COLORS.length],
-    title: t.short ? "짧은 반응 (ㅋㅋ, lol, 이모지 등)" : t.keywords.length ? t.keywords.join(", ") : `주제 ${t.cluster + 1}`,
+    title: topicTitle(t),
     meta: `댓글 ${num(t.size - t.replies)}개, 답글 ${num(t.replies)}개, 작성자 ${num(t.authors)}명, 좋아요 ${num(t.likes)}`,
     sample: t.short ? "뜻으로 묶기 어려운 짧은 댓글을 따로 모았어요." : t.sample,
     indices: t.indices,
+    list: "t" + t.cluster,
   })), "묶을 댓글이 없어요.");
 }
+const topicTitle = (t) => (t.short ? "짧은 반응 (ㅋㅋ, lol, 이모지 등)" : t.keywords.length ? t.keywords.join(", ") : `주제 ${t.cluster + 1}`);
+const topicColor = (cluster) => { const t = V.topics.find((x) => x.cluster === cluster); return !t ? "transparent" : t.short ? "#8D98AB" : TOPIC_COLORS[cluster % TOPIC_COLORS.length]; };
+
+// ---------- 댓글 목록 (주제별) ----------
+// 줄 높이를 고정하고 보이는 줄(+앞뒤 몇 줄)만 그린다 → 댓글 1,000개 이상이어도 가볍다.
+const ROW = 68;
+/** 그 주제에 속한 댓글 인덱스 */
+function topicMembers(cluster) {
+  const t = V.topics.find((x) => x.cluster === cluster);
+  return t ? t.indices : [];
+}
+function renderListOptions() {
+  const opts = V.topics.map((t) => {
+    const o = el("option", "", `${t.short ? "짧은 반응" : topicTitle(t)} (${num(t.size)})`);
+    o.value = "t" + t.cluster;
+    return o;
+  });
+  if (listSel.length > 1) {
+    const o = el("option", "", `지도에서 고른 댓글 (${num(listSel.length)})`);
+    o.value = "sel";
+    opts.unshift(o);
+  }
+  $("clist-topic").replaceChildren(...opts);
+}
+function listValid(src) {
+  if (src === "sel") return listSel.length > 1;
+  return typeof src === "string" && src[0] === "t" && V.topics.some((t) => "t" + t.cluster === src);
+}
+function setList(src, { keepScroll = false } = {}) {
+  if (!S || !V) return;
+  if (!listValid(src)) src = V.topics.length ? "t" + V.topics[0].cluster : null;
+  listSrc = src;
+  $("clist-topic").value = src || "";
+  const { comments } = S;
+  const base = src === "sel" ? listSel : src ? topicMembers(Number(src.slice(1))) : [];
+  const rows = [...base];
+  if ($("clist-sort").value === "new") rows.sort((a, b) => String(comments[b].createdAtApprox || "").localeCompare(String(comments[a].createdAtApprox || "")) || a - b);
+  else rows.sort((a, b) => (comments[b].likes || 0) - (comments[a].likes || 0) || a - b);
+  listRows = rows;
+  $("clist-count").textContent = `${num(rows.length)}개`;
+  $("clist-pad").style.height = `${rows.length * ROW}px`;
+  if (!keepScroll) $("clist-scroll").scrollTop = 0;
+  renderRows();
+}
+function renderRows() {
+  if (!S || !V) return;
+  const box = $("clist-pad");
+  if (!listRows.length) { box.replaceChildren(el("div", "clist-empty", "이 목록에 댓글이 없어요.")); return; }
+  const sc = $("clist-scroll");
+  const top = Number(sc.scrollTop) || 0, h = Number(sc.clientHeight) || 360;
+  const first = Math.max(0, Math.floor(top / ROW) - 4), last = Math.min(listRows.length, Math.ceil((top + h) / ROW) + 4);
+  const out = [];
+  for (let r = first; r < last; r++) {
+    const i = listRows[r], c = S.comments[i];
+    const row = el("div", "crow" + (i === listActive ? " active" : ""));
+    row.style.top = `${r * ROW}px`;
+    row.style.setProperty("--c", topicColor(V.topic.ids[i]));
+    row.dataset.i = String(i);
+    row.title = c.text.slice(0, 300);
+    const m = el("div", "m", `${c.parentId ? "답글 · " : ""}${nameOf(keyOf(c), c.author)} · ${c.createdAtRaw || ""} · ♥ ${num(c.likes || 0)}`);
+    row.append(el("div", "t", c.text), m);
+    row.onclick = () => pickFromList(i);
+    out.push(row);
+  }
+  box.replaceChildren(...out);
+}
+let rowsRaf = 0;
+$("clist-scroll").onscroll = () => { if (!rowsRaf) rowsRaf = requestAnimationFrame(() => { rowsRaf = 0; renderRows(); }); };
+$("clist-topic").onchange = () => { listActive = -1; setList($("clist-topic").value); };
+$("clist-sort").onchange = () => setList(listSrc);
+
+/** 지도에서 점을 누름 → 목록에서 그 댓글을 찾아 가운데로 스크롤하고 강조. 목록에 없으면 그 댓글의 주제로 바꾼다. */
+function revealInList(i) {
+  if (!S || !V) return;
+  listActive = i;
+  if (i < 0) { renderRows(); return; }
+  if (!listRows.includes(i)) setList("t" + V.topic.ids[i]);
+  const pos = listRows.indexOf(i);
+  if (pos >= 0) {
+    const sc = $("clist-scroll");
+    const h = Number(sc.clientHeight) || 360;
+    sc.scrollTop = Math.max(0, pos * ROW - (h - ROW) / 2);
+  }
+  renderRows();
+}
+/** 목록에서 댓글을 누름 → 지도에서 그 점을 가운데로 옮기고 고른 상태로 */
+function pickFromList(i) {
+  listActive = i;
+  if (mapMode !== "comments") setMapMode("comments");
+  graph.centerOn(i + 1);
+  graph.select([i + 1]);
+  showDetail(i);
+  renderRows();
+}
+/** 지도에서 여러 개를 고르면(Shift+드래그, 키워드 누르기 등) 목록에 '지도에서 고른 댓글'이 생긴다 */
+function listFromSelection(sel) {
+  if (!S || !V || shown !== "comments") return;
+  if (sel.length > 1) {
+    listSel = sel.filter((n) => n > 0).map((n) => n - 1);
+    renderListOptions();
+    setList("sel");
+  } else if (sel.length === 0 && listSel.length) {
+    listSel = [];
+    renderListOptions();
+    if (listSrc === "sel") setList(null);
+  }
+}
+
 
 function renderSignals() {
   const stateText = { natural: "자연스러운 반복", hold: "판단 보류" };
@@ -972,4 +1089,4 @@ initWeights();
 if (fixedTab) restoreFromPanel();
 
 // 자동 점검용 연결 고리 (tests/panel-smoke.mjs). 확장 프로그램에서는 정의돼 있지 않아 아무 일도 하지 않는다.
-globalThis.__WV_TEST__?.({ rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, state: () => ({ S, V, shown, mapMode }) });
+globalThis.__WV_TEST__?.({ rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });

@@ -482,6 +482,14 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       data.layout.reheat(0.5); animate(); draw();
     },
     fit() { autoFit = true; fitView(); draw(); },
+    /** 점 하나를 지도 가운데로 옮긴다 (너무 작게 보이면 조금 확대). 목록에서 댓글을 누를 때 쓴다. */
+    centerOn(i, { minK = 1.2 } = {}) {
+      if (!data || !(i >= 0 && i < data.nodes.length)) return;
+      autoFit = false;
+      const k = Math.max(view.k, minK);
+      view = { k, tx: -data.layout.x[i] * k, ty: -data.layout.y[i] * k };
+      draw();
+    },
     setTheme(name) { themeName = THEMES[name] ? name : "light"; MAP = THEMES[themeName]; PAL = PALETTES[themeName]; if (data) prepare(); draw(); },
     palette: () => PAL,
     redraw: draw,

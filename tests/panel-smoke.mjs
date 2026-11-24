@@ -105,6 +105,28 @@ const mx = V.commentLayout.x[1];
 V.commentLayout.moveGroup(g0, 40, 0);
 assert.equal(V.commentLayout.x[1], mx + 40);
 
+// 2-1) 댓글 목록: 첫 주제가 기본, 지도 점 → 목록, 목록 → 지도, 여러 개 고르기
+{
+  let st = api.state();
+  const t0 = st.V.topics[0];
+  assert.equal(st.listSrc, "t" + t0.cluster, "목록은 처음에 가장 큰 주제");
+  assert.deepEqual([...st.listRows].sort((a, b) => a - b), [...t0.indices].sort((a, b) => a - b), "목록 = 그 주제의 댓글");
+  const other = st.V.topics.find((t) => t.cluster !== t0.cluster);
+  const j = other.indices[0];
+  api.revealInList(j);
+  st = api.state();
+  assert.equal(st.listSrc, "t" + other.cluster, "목록에 없는 점을 누르면 그 댓글의 주제로 바뀐다");
+  assert.ok(st.listRows.includes(j) && st.listActive === j, "누른 댓글이 목록에서 강조된다");
+  api.pickFromList(t0.indices[0]);
+  assert.equal(api.state().listActive, t0.indices[0]);
+  api.listFromSelection([1, 2, 3]);
+  st = api.state();
+  assert.equal(st.listSrc, "sel");
+  assert.deepEqual(st.listRows.slice().sort((a, b) => a - b), [0, 1, 2], "지도에서 고른 댓글이 목록이 된다");
+  api.listFromSelection([]);
+  assert.notEqual(api.state().listSrc, "sel", "고른 것을 풀면 주제 목록으로 돌아간다");
+}
+
 // 3) 상세 카드, 답글, 색 기준 전환
 const replyIdx = comments.findIndex((c) => c.parentId);
 api.showDetail(replyIdx);
