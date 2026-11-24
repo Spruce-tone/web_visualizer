@@ -67,7 +67,9 @@ let topicLis = [], listOpts = [];
 byId("topics").replaceChildren = (...k) => { topicLis = k; };
 byId("clist-topic").replaceChildren = (...k) => { listOpts = k; };
 // 가짜 Worker: 실제 Worker 처리 함수(lib/worker-core.js)를 같은 스레드에서 비동기로 부르고, 메시지는 structuredClone으로 오간다.
-// workerMode = "crash"면 Worker가 죽은 것처럼 onerror → 패널이 같은 계산을 직접 해야 한다(대체 경로).
+// workerMode = "noise"면 잡히지 않은 오류(onerror)를 한 번 낸 뒤 정상 처리 → 패널은 계속 Worker를 쓴다.
+// workerMode = "hang"이면 답하지 않는다 → 시간 제한 뒤 패널이 같은 계산을 직접 해야 한다(대체 경로).
+globalThis.__WV_WORKER_QUIET_MS__ = { analyze: 300, topics: 300 };
 const { createHandler } = await import("../lib/worker-core.js");
 let workerMode = "ok";
 const workerMsgs = [];
@@ -80,7 +82,8 @@ globalThis.Worker = class {
     const msg = structuredClone(m);
     workerMsgs.push(msg.type);
     setTimeout(() => {
-      if (workerMode === "crash") { this.onerror?.({ message: "죽음", preventDefault() {} }); return; }
+      if (workerMode === "hang") return;
+      if (workerMode === "noise") this.onerror?.({ message: "잡히지 않은 오류", preventDefault() {} });
       this.h(msg, (out, tr) => this.onmessage?.({ data: structuredClone(out, { transfer: tr || [] }) }));
     }, 0);
   }
@@ -113,13 +116,21 @@ assert.deepEqual(workerMsgs, ["analyze"], "분석은 Worker에서");
   byId("res-range").value = 50;
   await byId("res-range").onchange();
   assert.equal(workerMsgs.length, 2, "처음 세밀도는 분석 때 함께 계산해 두었다");
-  workerMode = "crash";
+  workerMode = "noise";
   await byId("btn-all").onclick();
-  assert.ok(String(byId("status").textContent).includes("분석 완료"), "Worker가 죽어도 분석이 끝난다");
+  assert.deepEqual(workerMsgs.slice(2), ["analyze"], "치명적이지 않은 오류로는 Worker를 버리지 않는다");
+  assert.equal(fp(), viaWorker);
+  workerMode = "hang";
+  const tHang = Date.now();
+  await byId("btn-all").onclick();
+  assert.ok(String(byId("status").textContent).includes("분석 완료"), "Worker가 멈춰도 시간 제한 뒤 분석이 끝난다");
+  assert.ok(Date.now() - tHang >= 250, "시간 제한까지 기다린 뒤 넘어간다");
+  const nMsgs = workerMsgs.length;
   assert.equal(fp(), viaWorker, "Worker와 패널 계산 결과가 같다");
   byId("res-range").value = 75;
   await byId("res-range").onchange();
   assert.equal(api.state().V.K, k75, "세밀도 다시 나누기도 같다");
+  assert.equal(workerMsgs.length, nMsgs, "멈춘 Worker에는 더 보내지 않는다");
   byId("res-range").value = 50;
   await byId("res-range").onchange();
   ({ S, V } = api.state());

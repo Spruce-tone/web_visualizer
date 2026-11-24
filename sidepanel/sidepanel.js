@@ -149,7 +149,11 @@ function setBusy(busy) {
 let worker = null;
 let workerBroken = !!globalThis.__WV_NO_WORKER__ || typeof Worker === "undefined";
 let workerSeq = 0;
-const workerCalls = new Map(); // run → {resolve, reject, onStatus}
+const workerCalls = new Map(); // run → {resolve, reject, onStatus, timer, arm}
+let dieWorker = () => {};
+let workerAlive = false; // Worker가 한 번이라도 답했다 (모듈을 제대로 불러왔다)
+// Worker가 이만큼 아무 말이 없으면 멈춘 것으로 보고 패널에서 계산한다. 분석은 진행 문구가 올 때마다 다시 잰다(모델 받기·준비가 길 수 있어 넉넉히).
+const WORKER_QUIET_MS = { analyze: 180e3, topics: 30e3, ...globalThis.__WV_WORKER_QUIET_MS__ };
 class WorkerGone extends Error {}
 function getWorker() {
   if (workerBroken) return null;
@@ -162,21 +166,25 @@ function getWorker() {
     return null;
   }
   worker.onmessage = ({ data: m }) => {
+    workerAlive = true;
     const call = workerCalls.get(m.run);
     if (!call) return;
-    if (m.type === "status") { call.onStatus?.(m.text); return; }
+    if (m.type === "status") { call.onStatus?.(m.text); call.arm(); return; }
+    clearTimeout(call.timer);
     workerCalls.delete(m.run);
     if (m.type === "error") { const e = new Error(m.message); e.code = m.code; call.reject(e); } else call.resolve(m);
   };
-  const die = (e) => {
+  dieWorker = (e) => {
     console.warn("[WV] worker 오류 → 패널에서 계산", e);
     workerBroken = true;
     worker?.terminate(); worker = null;
-    for (const c of workerCalls.values()) c.reject(new WorkerGone("worker"));
+    for (const c of workerCalls.values()) { clearTimeout(c.timer); c.reject(new WorkerGone("worker")); }
     workerCalls.clear();
   };
-  worker.onerror = (e) => { e.preventDefault?.(); die(e.message || e); };
-  worker.onmessageerror = die;
+  // 불러오기 실패(한 번도 답하지 않음)만 Worker를 버린다. 그 뒤의 잡히지 않은 오류는 Worker가 살아 있으므로 기록만 하고,
+  // 그 때문에 답이 안 오면 위의 시간 제한이 패널 계산으로 넘긴다.
+  worker.onerror = (e) => { e.preventDefault?.(); if (workerAlive) console.warn("[WV] worker 안 오류 (계속 씀)", e.message || e); else dieWorker(e.message || e); };
+  worker.onmessageerror = dieWorker;
   return worker;
 }
 function callWorker(msg, onStatus) {
@@ -184,7 +192,10 @@ function callWorker(msg, onStatus) {
   if (!w) return Promise.reject(new WorkerGone("none"));
   const run = ++workerSeq;
   return new Promise((resolve, reject) => {
-    workerCalls.set(run, { resolve, reject, onStatus });
+    const call = { resolve, reject, onStatus, timer: 0 };
+    call.arm = () => { clearTimeout(call.timer); call.timer = setTimeout(() => dieWorker(`${msg.type} 응답 없음`), WORKER_QUIET_MS[msg.type] ?? 30e3); };
+    workerCalls.set(run, call);
+    call.arm();
     w.postMessage({ ...msg, run });
   });
 }
