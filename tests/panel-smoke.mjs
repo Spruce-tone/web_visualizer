@@ -118,6 +118,21 @@ assert.equal(V.commentLayout.x[1], mx + 40);
     for (const i of t.members.slice(t.indices.length)) assert.ok(st.V.extraOf[i].includes(t.cluster) && st.V.topic.ids[i] !== t.cluster);
   }
   assert.ok(st.V.extraOf.every((x) => x.length <= 2), "보조 주제는 2개까지");
+  // 주제를 통째로 골라 '내 분류'에 담으면 주 주제 댓글만 담긴다 (보조 댓글은 강조만, 다른 분류에서 옮겨지지 않음)
+  const tx = st.V.topics.find((t) => t.extra > 0);
+  assert.ok(tx, "점검용 데이터에 겹치는 댓글이 있어야 함");
+  const sec = tx.members[tx.members.length - 1];
+  api.graph.select([sec + 1]);
+  api.graph.tagSelection(1); // 보조 댓글을 먼저 분류 2에
+  api.graph.select(tx.members.map((i) => i + 1), { tagOnly: tx.indices.map((i) => i + 1) });
+  api.graph.tagSelection(0);
+  const tg = api.graph.tagsArray();
+  assert.ok(tx.indices.every((i) => tg[i + 1] === 0), "주 주제 댓글은 분류 1에 담김");
+  assert.equal(tg[sec + 1], 1, "보조 댓글은 원래 분류(2)에 그대로");
+  api.graph.select([sec + 1]);
+  api.graph.tagSelection(-1 + 1); // 직접 고른 점은 그대로 담긴다
+  assert.equal(api.graph.tagsArray()[sec + 1], 0);
+  tg.fill(-1);
   const other = st.V.topics.find((t) => t.cluster !== t0.cluster);
   const j = other.indices[0];
   api.revealInList(j);

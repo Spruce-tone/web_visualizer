@@ -517,6 +517,18 @@ const { overlapTopics, OVERLAP_MAX_EXTRA } = await import("../lib/community.js")
   assert.ok(!skip.members.get(0).includes(0));
   // 결정적
   assert.deepEqual(overlapTopics(ids, base).extra, overlapTopics(ids, base).extra);
+  // 엣지 순서를 섞어도 같은 결과 (members 안의 순서까지)
+  const bEdges = [...base, { a: 10, b: 0, w: 0.5 }, { a: 10, b: 1, w: 0.5 }, { a: 10, b: 5, w: 0.4 }, { a: 10, b: 6, w: 0.4 }];
+  const ref = overlapTopics(ids, bEdges);
+  for (const seed of [1, 7, 42]) {
+    let x = seed;
+    const shuffled = bEdges.map((e) => ({ e, k: (x = (x * 1103515245 + 12345) % 2147483648) })).sort((p, q) => p.k - q.k).map(({ e }) => e);
+    const got = overlapTopics(ids, shuffled);
+    assert.deepEqual(got.extra, ref.extra, "엣지 순서와 무관 (보조 주제)");
+    assert.deepEqual([...got.members.entries()], [...ref.members.entries()], "엣지 순서와 무관 (구성원)");
+  }
+  const tie = overlapTopics(ids4, [...e4].reverse());
+  assert.deepEqual(tie.extra[8], many.extra[8], "같은 힘이면 주제 번호 순 (엣지 순서와 무관)");
 }
 
 console.log("all tests passed");

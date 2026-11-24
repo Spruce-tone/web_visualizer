@@ -524,7 +524,7 @@ function stepTopics(delta) {
 }
 
 // ---------- 목록 ----------
-function item({ key, color, title, meta, score, state, sample, samples, parts, why, indices, list }) {
+function item({ key, color, title, meta, score, state, sample, samples, parts, why, indices, tagIndices, list }) {
   const li = el("li", "item");
   if (color) li.style.setProperty("--c", color);
   const row = el("div", "row");
@@ -548,7 +548,7 @@ function item({ key, color, title, meta, score, state, sample, samples, parts, w
     focusKey = on ? key : null;
     const nodeIdx = indices.map((i) => i + 1);
     graph.focus(on ? new Set([0, ...nodeIdx]) : null);
-    if (on) graph.select(nodeIdx); else graph.clearSelection(); // 고른 묶음을 바로 '내 분류'에 담을 수 있게
+    if (on) graph.select(nodeIdx, { tagOnly: tagIndices?.map((i) => i + 1) }); else graph.clearSelection(); // 고른 묶음을 바로 '내 분류'에 담을 수 있게 (주제는 주 주제 댓글만 담김)
     if (on && list) setList(list); // 주제를 누르면 댓글 목록도 그 주제로
     document.querySelectorAll(".item").forEach((x) => x.classList.remove("active"));
     if (on) li.classList.add("active");
@@ -568,6 +568,7 @@ function renderTopics() {
     meta: `댓글 ${num(t.size - t.replies)}개, 답글 ${num(t.replies)}개, 작성자 ${num(t.authors)}명, 좋아요 ${num(t.likes)}${t.extra ? ` · 다른 주제와 겹치는 댓글 +${num(t.extra)}개` : ""}`,
     sample: t.short ? "뜻으로 묶기 어려운 짧은 댓글을 따로 모았어요." : t.sample,
     indices: t.members,
+    tagIndices: t.indices,
     list: "t" + t.cluster,
   })), "묶을 댓글이 없어요.");
 }
@@ -1108,4 +1109,4 @@ initWeights();
 if (fixedTab) restoreFromPanel();
 
 // 자동 점검용 연결 고리 (tests/panel-smoke.mjs). 확장 프로그램에서는 정의돼 있지 않아 아무 일도 하지 않는다.
-globalThis.__WV_TEST__?.({ rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });
+globalThis.__WV_TEST__?.({ graph, rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });

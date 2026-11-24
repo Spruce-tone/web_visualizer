@@ -309,7 +309,10 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     tooltip.style.top = `${Math.max(4, Math.min(my + 14, H - tooltip.offsetHeight - 4))}px`;
   }
 
-  const emitSelection = () => onSelectionChange?.([...selection]);
+  // 주제를 통째로 고르면 보조로 속한 댓글도 강조되지만, '내 분류'에는 주 주제 댓글만 담는다
+  // (분류는 점마다 하나라서, 보조 댓글까지 담으면 다른 분류에 있던 댓글이 조용히 옮겨진다).
+  let tagOnly = null; // null = 고른 점 모두 담기
+  const emitSelection = (only = null) => { tagOnly = only; onSelectionChange?.([...selection]); };
   const emitTags = () => onTagsChange?.(api.tagCounts());
   const pos = (ev) => { const r = canvas.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
 
@@ -391,8 +394,12 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     if (drag.type === "label" && !drag.moved) { // 키워드를 그냥 누르면 그 주제의 댓글을 모두 고른다
       const c = drag.cluster;
       selection = new Set();
-      data.nodes.forEach((nd, i) => { if ((nd.cluster === c || nd.also?.includes(c)) && nd.kind !== "doc") selection.add(i); }); // 보조로 속한 댓글도 함께
-      emitSelection();
+      const primary = new Set();
+      data.nodes.forEach((nd, i) => {
+        if (nd.kind === "doc") return;
+        if (nd.cluster === c) { selection.add(i); primary.add(i); } else if (nd.also?.includes(c)) selection.add(i); // 보조로 속한 댓글도 함께 강조
+      });
+      emitSelection(primary);
     }
     if (drag.type === "pan" && !drag.moved && selection.size) { selection.clear(); emitSelection(); onPick?.(-1); }
     if (drag.type === "box") {
@@ -469,7 +476,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
       animate();
     },
     focus(nodeSet) { if (data) { data.focus = nodeSet; draw(); } },
-    select(nodeIdx) { selection = new Set(nodeIdx); emitSelection(); draw(); },
+    select(nodeIdx, { tagOnly: only = null } = {}) { selection = new Set(nodeIdx); emitSelection(only ? new Set(only) : null); draw(); },
     clearSelection() { selection.clear(); emitSelection(); draw(); },
     setLabels(labels) { if (data) { data.labels = labels; draw(); } },
     toggleLabels(on) { showLabels = on; draw(); },
@@ -478,7 +485,7 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     setFilter(f) { filter = f; draw(); },
     // 분류(수동 태그)
     setTagCount(n) { tagCount = n; },
-    tagSelection(tag) { if (!tagCount) return; for (const i of selection) tags[i] = tag; emitTags(); draw(); },
+    tagSelection(tag) { if (!tagCount) return; for (const i of selection) if (!tagOnly || tagOnly.has(i)) tags[i] = tag; emitTags(); draw(); },
     removeTag(tag) { // 분류 삭제: 해당 분류는 비우고 뒤 번호를 당긴다
       for (let i = 0; i < tags.length; i++) { if (tags[i] === tag) tags[i] = -1; else if (tags[i] > tag) tags[i]--; }
       emitTags(); draw();
