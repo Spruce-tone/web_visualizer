@@ -710,6 +710,29 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   for (let i = 0; i < M; i++) for (let j = i + 1; j < M; j++) if (Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j]) <= 3 * m) par[find(i)] = find(j);
   assert.equal(new Set(Array.from({ length: M }, (_, i) => find(i))).size, 1, "서로만 닿은 주제 무리도 섬이 되지 않는다");
 }
+{
+  // 주제 하나(40개)를 600px 끌어 놓으면 그 자리에 두고, 나머지 주제는 따라오지 않는다 (섬 방지 당김이 옮긴 주제를 쫓지 않게)
+  let sd = 9; const r = () => ((sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const sizes = [150, 150, 40];
+  const gg = sizes.flatMap((m, g) => Array(m).fill(g)), M = gg.length;
+  const byG = sizes.map((_, g) => gg.map((v, i) => (v === g ? i : -1)).filter((i) => i >= 0));
+  const ee = [];
+  for (let i = 0; i < M; i++) {
+    for (let t = 0; t < 3; t++) { const j = byG[gg[i]][Math.floor(r() * byG[gg[i]].length)]; if (j !== i) ee.push({ a: i, b: j, sim: 0.6 }); }
+    const j = Math.floor(r() * M); if (gg[j] !== gg[i]) ee.push({ a: i, b: j, sim: 0.6 });
+  }
+  const L = createLayout(gg.map(() => [r() * 200 - 100, r() * 200 - 100]), ee, { groups: gg, cohesion: 0.05, alpha: 0.6 });
+  for (let f = 0; f < 3000 && L.tick(); f++);
+  const restCen = () => { let sx = 0, sy = 0, c = 0; for (let i = 0; i < M; i++) if (gg[i] !== 2) { sx += L.x[i]; sy += L.y[i]; c++; } return [sx / c, sy / c]; };
+  const before = restCen();
+  for (let f = 0; f < 30; f++) { L.moveGroup(2, 20, 0); L.tick(); L.tick(); }
+  L.endGroupDrag();
+  for (let i = 0; i < 600; i++) L.tick();
+  const after = restCen();
+  const moved = Math.hypot(after[0] - before[0], after[1] - before[1]);
+  // 600px 끌었을 때 나머지는 주제 사이 선에 끌려 조금만 온다(약 66px). 끈 주제를 쫓아가면 수백 px가 된다.
+  assert.ok(moved < 100, `주제 하나를 멀리 끌어 놓아도 나머지는 거의 그대로 (${moved.toFixed(1)}px)`);
+}
 
 // ---- 겹침 분류 (여러 주제) ----
 const { overlapTopics, OVERLAP_MAX_EXTRA } = await import("../lib/community.js");
