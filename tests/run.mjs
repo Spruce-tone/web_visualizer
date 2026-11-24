@@ -217,11 +217,13 @@ const { paraphraseGroups, pileOns, coActiveAuthors, SessionMemory } = await impo
 const { centerVectors } = await import("../lib/vec.js");
 
 // 묶음 신호를 한 번에 계산하는 도우미
+// 패널과 같은 경로: 평균 유사도는 묶음 안 모든 쌍(sim), 사슬 기준은 묶는 기준(th)
 function signalsFor(list, doc = null, th = 0.6) {
-  const nb = topKNeighbors(hashEmbed(list.map((c) => c.text)), 8);
+  const V = hashEmbed(list.map((c) => c.text));
+  const nb = topKNeighbors(V, 8);
   const ed = edgesFromNeighbors(nb, th);
   const cl = clustersFromEdges(list.length, ed);
-  return { sig: clusterSignals(cl.groups, list, ed, { doc }), cl, ed };
+  return { sig: clusterSignals(cl.groups, list, ed, { doc, sim: (i, j) => dot(V[i], V[j]), linkThreshold: th }), cl, ed };
 }
 const mk = (text, author, extra = {}) => ({ id: `${author}-${text.length}-${Math.abs(text.charCodeAt(3) || 0)}`, text, author, authorId: author, likes: 0, createdAtRaw: "3일 전", createdAtApprox: "2026-11-21T00:00:00Z", parentId: null, meta: {}, ...extra });
 
@@ -918,6 +920,21 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(r.edgeOnly[0].state, "scored", "(예전) 이어진 쌍만 보면 점수를 낸다");
   assert.ok(r.withSim[0].meanSim < 0.6, "묶음 전체 평균 유사도는 낮다");
   assert.equal(r.withSim[0].state, "natural", "사슬 묶음은 점수를 받지 않는다");
+  // 묶는 기준(슬라이더)을 낮춰도: 작은 묶음은 '판단 보류', 사슬 기준은 슬라이더 값을 따른다
+  const pair = [mk("오늘 경기 정말 재밌었다 다음에도 꼭 보러 가야지", "s1"), mk("오늘 경기 정말 재밌었다 다음 주에 또 봐요", "s2"), mk("편집이 깔끔해서 보기 좋네요 자막도 좋고요", "s3")];
+  for (const th of [0.3, 0.6]) {
+    const ps = signalsFor(pair, null, th).sig.filter((x) => x.size === 2);
+    if (th === 0.3) assert.equal(ps.length, 1, "문구 기준 0.3에서는 두 댓글(유사도 약 0.4)이 묶인다");
+    assert.ok(ps.every((x) => x.state === "hold"), `문구 기준 ${th}: 2개짜리 묶음은 판단 보류 (${ps.map((x) => x.state)})`);
+  }
+  {
+    const V = hashEmbed(chain.map((c) => c.text));
+    const ed3 = edgesFromNeighbors(topKNeighbors(V, 8), 0.3), cl3 = clustersFromEdges(chain.length, ed3);
+    const s3 = clusterSignals(cl3.groups, chain, ed3, { sim: (i, j) => dot(V[i], V[j]), linkThreshold: 0.3 });
+    const big3 = s3.reduce((a, x) => (x.size > a.size ? x : a));
+    assert.equal(big3.state === "natural", big3.meanSim < 0.3, `문구 기준 0.3: 평균 ${big3.meanSim.toFixed(2)}이면 사슬 판정은 0.3과 견준다`);
+    assert.ok(big3.meanSim >= 0.3 ? big3.state === "scored" : true, "0.3 넘는 평균이면 사슬로 빼지 않고 점수를 낸다");
+  }
   // 같은 긴 문구를 여러 작성자가 그대로 쓰면 여전히 점수
   const copy = Array.from({ length: 6 }, (_, i) => mk("이 영상 꼭 끝까지 보세요 진실이 다 나옵니다 주변에 널리 퍼뜨려 주세요", "p" + i));
   copy.push(mk("오늘 점심은 김치찌개를 먹었는데 맛있었다", "q1"), mk("편집이 깔끔해서 보기 좋네요 자막도 좋고요", "q2"));

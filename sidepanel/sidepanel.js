@@ -269,7 +269,7 @@ function computeLex() {
   const n = comments.length;
   const lexEdges = edgesFromNeighbors(lexNbrs, thLex);
   const lex = clustersFromEdges(n, lexEdges);
-  const signals = clusterSignals(lex.groups, comments, lexEdges, { weights, doc, sim: S.lexVecs ? (i, j) => dot(S.lexVecs[i], S.lexVecs[j]) : null });
+  const signals = clusterSignals(lex.groups, comments, lexEdges, { weights, doc, sim: S.lexVecs ? (i, j) => dot(S.lexVecs[i], S.lexVecs[j]) : null, linkThreshold: thLex });
   const flagged = new Set(signals.filter((s) => s.state === "scored" && s.score >= weights.thresholds.flag).flatMap((s) => s.indices));
   const feats = authorFeatures(comments, lex.ids, lex.groups);
   const aSignals = authorSignals(feats, { weights });
