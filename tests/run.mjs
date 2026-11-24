@@ -459,7 +459,10 @@ twoG.push({ a: 0, b: 6, w: 0.2 });
 assert.deepEqual(louvain(12, twoG).sizes, [6, 6]);
 
 // 모든 묶음에 흔한 낱말은 키워드에서 빠진다
-const kwD = topicKeywords([[0, 1, 2], [3, 4, 5]], ["민주당 탄핵 추진 반대", "민주당 탄핵 무리", "민주당 탄핵 절차", "민주당 경제 정책 실패", "민주당 경제 물가", "민주당 경제 대책"]);
+// 댓글 6개뿐이면 3/6은 우연과 가를 수 없다(정확 검정 p = 0.05) → 같은 글을 세 벌로 늘려(18개) 본다
+const dTexts = ["민주당 탄핵 추진 반대", "민주당 탄핵 무리", "민주당 탄핵 절차", "민주당 경제 정책 실패", "민주당 경제 물가", "민주당 경제 대책"];
+const kwD = topicKeywords([[0, 1, 2, 6, 7, 8, 12, 13, 14], [3, 4, 5, 9, 10, 11, 15, 16, 17]], [...dTexts, ...dTexts, ...dTexts]);
+assert.deepEqual(topicKeywords([[0, 1, 2], [3, 4, 5]], dTexts), [[], []], "6개 중 3개는 우연과 가를 수 없어 이름을 짓지 않는다 (정확 검정)");
 assert.ok(!kwD[0].includes("민주당") && !kwD[1].includes("민주당"), `흔한 낱말 제외 (${kwD})`);
 assert.ok(kwD[0].includes("탄핵"));
 assert.ok(kwD[1].includes("경제"));
