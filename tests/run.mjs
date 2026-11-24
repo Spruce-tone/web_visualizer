@@ -869,6 +869,14 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
     // 이전 자리 당김(REGROUP_HOLD)이 없으면 이동 중앙값 0.50, 그대로인 주제 0.34 (점 간격 배수)
     const all = [...mv].sort((p, q) => p - q)[N >> 1];
     assert.ok(all < 0.42 && same[same.length >> 1] < 0.3, `덜 움직인다 (중앙값 ${all.toFixed(2)}, 그대로인 주제 ${same[same.length >> 1].toFixed(2)} × 점 간격)`);
+    // 이전 자리 당김은 첫 자리 잡기에만: 멈춘 뒤 다시 데워도(점 끌기·고정 풀기) 세밀도 바꾸기 전 자리로 끌려가지 않는다
+    {
+      const toHome = () => { const v = Array.from({ length: N }, (_, i) => Math.hypot(R.x[i] - strong.x[i], R.y[i] - strong.y[i]) / m).sort((p, q) => p - q); return v[N >> 1]; };
+      const d0 = toHome();
+      for (let k = 0; k < 3; k++) { R.reheat(0.5); for (let f = 0; f < 3000 && R.tick(); f++); }
+      // 당김이 남아 있으면 0.76 (이전 자리 쪽으로 돌아감), 지우면 1.35 (점 간격 배수, 이동 중앙값)
+      assert.ok(toHome() > 1.05, `다시 데워도 이전 자리로 당기지 않는다 (${d0.toFixed(2)} → ${toHome().toFixed(2)})`);
+    }
   }
   // 보조 주제 댓글은 그 주제를 끌 때 반쯤 따라온다 (주 주제 댓글은 그 자리)
   {
