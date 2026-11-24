@@ -27,6 +27,7 @@
 - 개발·점검: 영상 주소 끝에 `#wv-dev-open` 을 붙이면 '크게 보기'가 같은 탭 묶음에 열린다 (자동화 도구로 화면 점검용).
 - 주제는 k-평균(lib/cluster.js)에서 커뮤니티로 바꿨다. k-평균은 이웃 찾기의 구역 나누기에만 쓴다.
 - 객관성 기준: `docs/objectivity.md` / 신호 계산·참고 연구: `docs/signals.md`
+- 로컬 오케스트레이터 인계 자료: `docs/handoff/` (SOUL.md, GUIDELINES.md, FIRST_PROMPT.md)
 - YouTube 전체 수집: `content/youtube.js` `collectAll` (watch HTML의 ytcfg/ytInitialData → youtubei/v1/next continuation). 응답 파서는 `content/parse.js` `parseInnertubeComments` (테스트 있음)
 
 ## 객관성 (가장 우선하는 규칙)
