@@ -834,4 +834,19 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(yv, bv, "youtube.js BRIDGE_V 와 page-bridge.js V 가 다름");
 }
 
+// 보정 파일이 확장 안에 없으면 fetch하지 않는다 (콘솔 404 방지)
+{
+  const { loadCalibrated, packageHas } = await import("../lib/weights.js");
+  assert.equal(await packageHas("x"), null, "chrome 없으면 알 수 없음");
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = async () => { fetched++; return { ok: false }; };
+  globalThis.chrome = { runtime: { getPackageDirectoryEntry: (cb) => cb({ getFile: (p, _o, ok, fail) => (p === "calibration/weights.json" ? fail(new Error("NotFound")) : ok({})) }) } };
+  assert.equal(await packageHas("manifest.json"), true);
+  assert.equal(await loadCalibrated(), null);
+  assert.equal(fetched, 0, "파일이 없으면 fetch하지 않음");
+  delete globalThis.chrome;
+  globalThis.fetch = realFetch;
+}
+
 console.log("all tests passed");
