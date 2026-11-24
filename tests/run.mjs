@@ -527,6 +527,8 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
   assert.equal(partial.limited, true);
   assert.equal(partial.comments.length, 200, `후보 안에서 원댓글을 담음 (${partial.comments.length}개)`);
   assert.ok(partial.comments.every((c) => !c.parentId), "막힌 뒤에는 답글을 받지 않음");
+  assert.equal(partial.noReplies, true, "답글을 못 받았다고 알린다");
+  assert.equal((await run({ includeReplies: false }, fakeYT({ fail: (ep) => ("p" in ep && ep.p >= 10 ? { status: 500 } : null), delay: false }))).noReplies, false, "답글을 원하지 않았으면 알릴 것 없음");
   const y429 = fakeYT({ fail: (ep) => ("p" in ep && ep.p >= 10 ? { status: 429 } : null), delay: false });
   const p429 = await run({}, y429);
   assert.equal(p429.comments.length, 200); assert.equal(p429.limited, true);
@@ -545,6 +547,7 @@ assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])),
     const lw = [];
     const rl = await run({ sleep: async (ms) => { lw.push(ms); } }, yl);
     assert.equal(rl.limited, true); assert.equal(rl.complete, false);
+    assert.equal(rl.noReplies, false, "답글을 받다 막힌 경우는 받은 답글이 있다");
     assert.ok(hits <= 4 + 2, `막힌 뒤 보낸 답글 요청 ${hits}개 (한 스레드 4번 + 이미 나간 것)`);
     assert.ok(rl.comments.length < 300, "그때까지 담은 것으로 끝냄");
     // 섞은 순서는 후보 수와 씨앗으로만 정해진다 → 막힌 스레드의 위치 뒤 원댓글은 담기지 않아야 한다

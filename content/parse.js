@@ -263,7 +263,8 @@ WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = tru
   }
   filled = true; // 다 담았으면 미리 받던 답글 사슬은 지금 요청까지만
   // 답글을 받다 limited가 되면 막힌 스레드(받은 답글까지)에서 멈추고 그 뒤 원댓글은 담지 않는다 — 답글 없는 원댓글만 이어 붙여 답글 비율이 틀어지지 않게
-  return { comments, total, pool, limited, complete: pool.complete && repliesOk && !limited && !isCancelled() };
+  // noReplies: 답글을 원했지만 후보 단계에서 막혀 답글을 하나도 받지 않았다 (패널이 그렇다고 알려 준다)
+  return { comments, total, pool, limited, noReplies: includeReplies && scanLimited, complete: pool.complete && repliesOk && !limited && !isCancelled() };
 };
 
 /** YouTube가 '하이라이트 댓글'로 이동할 때 쓰는 params: protobuf { 15: 댓글 id, 36: { 24: 0 } } 를 base64 → URL 인코딩 (실제 페이지 값과 일치 확인) */

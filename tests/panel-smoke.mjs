@@ -319,5 +319,9 @@ assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안
   const st = String(byId("status").textContent);
   assert.ok(st.includes("분석 완료") && st.includes("요청을 계속 받지 않아서"), `limited 안내: ${st}`);
   assert.ok(!st.includes("댓글이 꺼진"), "댓글이 꺼졌다는 안내는 없음");
+  assert.ok(!st.includes("답글은 받지 못했어요"), "답글을 받다 막힌 경우엔 그 말이 없다");
+  fixture.doc.meta.collection.noReplies = true; // 후보 단계에서 막힘 → 답글 0개
+  await byId("btn-all").onclick();
+  assert.ok(String(byId("status").textContent).includes("답글은 받지 못했어요"), "후보 단계에서 막히면 답글을 못 받았다고 알린다");
 }
 console.log("panel smoke passed");

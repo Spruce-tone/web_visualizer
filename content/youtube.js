@@ -159,7 +159,7 @@
       if (queue.length || stopped()) complete = false;
     }
 
-    let pool = null, limited = false;
+    let pool = null, limited = false, noReplies = false;
     if (sort === "random" && sortItems.length >= 2) {
       // 고르게 무작위: 최신순(좋아요와 무관한 순서)으로 원댓글 후보를 뽑을 수의 3배까지 훑은 뒤, 씨앗이 정해진 무작위로 뽑는다(WV.sampleRandom).
       // 후보가 영상의 모든 원댓글을 덮으면 전체에서 균등 추출이고, 댓글이 아주 많으면 '최근 후보 중 균등 추출'이 된다.
@@ -174,6 +174,7 @@
       pool = r.pool;
       complete = r.complete;
       limited = r.limited;
+      noReplies = r.noReplies;
     } else if (sort === "mix" && sortItems.length >= 2) {
       // 인기순 절반 + 최신순 절반: 좋아요 많은 댓글 쪽으로만 치우치지 않게
       await drain(sortItems[0].serviceEndpoint, Math.ceil(max / 2));
@@ -185,7 +186,7 @@
       await drain(sortItems[sort === "new" ? 1 : 0]?.serviceEndpoint, max);
     }
     doc.meta.totalComments = total;
-    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled: stopped(), complete, pool, limited };
+    doc.meta.collection = { method: "innertube", sort, includeReplies, cancelled: stopped(), complete, pool, limited, noReplies };
     return { doc, comments };
   }
 
