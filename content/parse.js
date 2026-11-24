@@ -138,6 +138,116 @@ WV.seededShuffle = function (arr, seed) {
   return out;
 };
 
+/** 무작위 추출 후보 수: 뽑을 수의 3배(최소 600, 최대 20,000). 후보 안에서는 균등 추출이다. */
+WV.poolLimit = (max) => Math.min(20000, Math.max(max * 3, 600));
+
+/** 다시 시도할 만한 실패인가: 요청 제한(429)·서버 오류(5xx)·네트워크 오류(상태 없음) */
+WV.retryable = (e) => !e?.status || e.status === 429 || e.status >= 500;
+
+/**
+ * 실패하면 물러났다가(0.8초, 1.6초, 3.2초) 다시 시도한다. 다시 시도할 수 없는 실패(예: 403)는 바로 던진다.
+ * @param {() => Promise<any>} fn
+ * @param {{tries?: number, baseMs?: number, sleep?: (ms:number)=>Promise<void>, onRetry?: (e:any)=>void}} [o]
+ */
+WV.withBackoff = async function (fn, { tries = 4, baseMs = 800, sleep = WV.sleep, onRetry } = {}) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (i >= tries - 1 || !WV.retryable(e)) throw e;
+      onRetry?.(e);
+      await sleep(baseMs * 2 ** i);
+    }
+  }
+};
+
+/**
+ * 고르게 무작위 추출 (사이트 요청은 page가 한다 → 테스트에서는 가짜 page로 돌린다).
+ * 1) 최신순(좋아요와 무관한 순서)으로 원댓글 후보를 poolLimit개까지 훑는다. 다음 쪽 주소가 앞 쪽 응답에 있으므로 이 사슬은 차례로만 받을 수 있다.
+ * 2) 씨앗이 정해진 섞기로 후보 순서를 정하고, 그 순서대로 원댓글과 답글을 max개까지 담는다.
+ *    답글은 스레드마다 따로 받으므로 동시에 concurrency개까지 받는다. 담는 순서는 섞은 순서 그대로라 결과는 동시 요청과 상관없이 같다.
+ * - 서버 부담: 모든 요청의 시작 간격을 minGapMs 이상으로 둔다. 다시 시도할 실패(429·5xx)가 한 번이라도 나면 동시 요청을 1개로 줄이고 물러난다.
+ * @param {object} o
+ * @param {any} o.start 최신순 정렬의 첫 endpoint
+ * @param {(endpoint:any, replies:boolean) => Promise<{comments:any[], next:any[], replies:any[], threads:{id:string,endpoints:any[]}[], total:number|null, error:string|null}>} o.page
+ * @param {number} o.max
+ * @param {string} o.seed
+ * @param {boolean} [o.includeReplies]
+ * @param {number} [o.concurrency] 답글 동시 요청 수 (2~3 권장)
+ * @param {number} [o.minGapMs] 요청 시작 사이 최소 간격
+ * @param {(count:number, total:number|null, phase:string)=>void} [o.onProgress]
+ * @param {() => boolean} [o.isCancelled]
+ * @param {(ms:number)=>Promise<void>} [o.sleep]
+ * @param {{tries?: number, baseMs?: number}} [o.backoff]
+ */
+WV.sampleRandom = async function ({ start, page, max, seed, includeReplies = true, concurrency = 3, minGapMs = 100, onProgress, isCancelled = () => false, sleep = WV.sleep, backoff = {} }) {
+  let lanes = Math.max(1, concurrency);
+  let nextStart = 0;
+  const call = (ep, replies) => WV.withBackoff(async () => {
+    // 시작 간격 맞추기 (동시에 여러 요청이 기다려도 차례로 간격을 둔다)
+    const now = Date.now(), at = Math.max(now, nextStart);
+    nextStart = at + minGapMs;
+    if (at > now) await sleep(at - now);
+    return page(ep, replies);
+  }, { ...backoff, sleep, onRetry: () => { lanes = 1; } });
+
+  const limit = WV.poolLimit(max);
+  const cand = [], seenTop = new Set(), threadEps = new Map();
+  let total = null, scanOk = true;
+  const queue = [start];
+  while (queue.length && cand.length < limit && !isCancelled()) {
+    let r;
+    try { r = await call(queue.shift(), false); }
+    catch (e) { if (!cand.length) throw e; scanOk = false; break; } // 후보가 있으면 거기까지로 뽑는다
+    if (r.error && !cand.length) throw new Error(r.error);
+    if (r.total) total = r.total;
+    for (const c of r.comments) if (!c.parentId && !seenTop.has(c.id)) { seenTop.add(c.id); cand.push(c); }
+    for (const t of r.threads) if (t.id && t.endpoints.length) threadEps.set(t.id, t.endpoints);
+    queue.push(...r.next);
+    onProgress?.(cand.length, total, "후보 확인");
+  }
+  const pool = { size: cand.length, limit, complete: scanOk && !queue.length && !isCancelled() };
+
+  const order = WV.seededShuffle(cand, seed);
+  const comments = [], seen = new Set();
+  let repliesOk = true, filled = false;
+  // 한 스레드의 답글: 그 스레드 안에서는 '답글 더보기'가 사슬이라 차례로 받는다. budget개를 넘으면 멈춘다.
+  const fetchThread = async (eps, budget) => {
+    const rq = [...eps], out = [];
+    try {
+      while (rq.length && out.length < budget && !filled && !isCancelled()) {
+        const r = await call(rq.shift(), true);
+        for (const c of r.comments) if (c.parentId) out.push(c);
+        rq.push(...r.replies);
+      }
+    } catch { repliesOk = false; } // 이 스레드의 답글만 빠진다
+    return out;
+  };
+  const jobs = new Map(); // 섞은 순서 위치 → 답글 Promise
+  let ahead = 0;
+  const launch = (k) => {
+    // 앞으로 담을 스레드의 답글을 미리 받는다. 담기 전 것만 lanes개까지 → 끝에서 버리는 요청은 lanes-1개 이하
+    ahead = Math.max(ahead, k);
+    while (jobs.size < lanes && ahead < order.length) {
+      const eps = includeReplies ? threadEps.get(order[ahead].id) : null;
+      if (eps) jobs.set(ahead, fetchThread(eps, max - comments.length));
+      ahead++;
+    }
+  };
+  for (let k = 0; k < order.length && comments.length < max && !isCancelled(); k++) {
+    launch(k);
+    const top = order[k];
+    if (!seen.has(top.id)) { seen.add(top.id); comments.push(top); }
+    if (jobs.has(k)) {
+      const replies = await jobs.get(k);
+      jobs.delete(k);
+      for (const c of replies) if (!seen.has(c.id) && comments.length < max) { seen.add(c.id); comments.push(c); }
+      onProgress?.(comments.length, total, "답글 받는 중");
+    }
+  }
+  filled = true; // 다 담았으면 미리 받던 답글 사슬은 지금 요청까지만
+  return { comments, total, pool, complete: pool.complete && repliesOk && !isCancelled() };
+};
+
 /** YouTube가 '하이라이트 댓글'로 이동할 때 쓰는 params: protobuf { 15: 댓글 id, 36: { 24: 0 } } 를 base64 → URL 인코딩 (실제 페이지 값과 일치 확인) */
 WV.linkedCommentParams = function (id) {
   const bytes = [122, id.length, ...[...id].map((c) => c.charCodeAt(0)), 162, 2, 3, 192, 1, 0];

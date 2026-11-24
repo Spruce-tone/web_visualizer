@@ -101,7 +101,7 @@
       },
       body: JSON.stringify({ context: cfg.INNERTUBE_CONTEXT, continuation: endpoint.continuationCommand.token }),
     });
-    if (!res.ok) throw new Error(`YouTube 응답 오류 ${res.status}`);
+    if (!res.ok) throw Object.assign(new Error(`YouTube 응답 오류 ${res.status}`), { status: res.status }); // 429·5xx면 물러났다가 다시 (WV.withBackoff)
     return res.json();
   }
 
@@ -137,7 +137,8 @@
       let pending = sortEndpoint ? null : first; // 정렬 메뉴가 없으면 첫 응답부터 바로 사용
       if (sortEndpoint) queue.push(sortEndpoint);
       while ((pending || queue.length) && comments.length < limit && !cancelled) {
-        const resp = pending || (await callNext(queue.shift(), cfg));
+        const ep = pending ? null : queue.shift();
+        const resp = pending || (await WV.withBackoff(() => callNext(ep, cfg)));
         pending = null;
         const r = WV.parseInnertubeComments(resp, doc.id, { includeReplies });
         if (r.error && !comments.length) throw new Error(r.error);
@@ -157,36 +158,18 @@
 
     let pool = null;
     if (sort === "random" && sortItems.length >= 2) {
-      // 고르게 무작위: 최신순(좋아요와 무관한 순서)으로 원댓글 후보를 넉넉히 훑은 뒤, 씨앗이 정해진 무작위로 뽑는다.
-      // 후보가 영상의 모든 원댓글을 덮으면 전체에서 균등 추출이고, 댓글이 아주 많으면 '최근 N개 중 균등 추출'이 된다.
-      const poolLimit = Math.min(20000, Math.max(max * 3, 1500));
-      const cand = [], seenTop = new Set(), threadEps = new Map();
-      const queue = [sortItems[1].serviceEndpoint];
-      while (queue.length && cand.length < poolLimit && !cancelled) {
-        const r = WV.parseInnertubeComments(await callNext(queue.shift(), cfg), doc.id, { includeReplies });
-        if (r.error && !cand.length) throw new Error(r.error);
-        if (r.total) total = r.total;
-        for (const c of r.comments) { if (!c.parentId && !seenTop.has(c.id)) { seenTop.add(c.id); cand.push(c); } }
-        for (const t of r.threads) if (t.id && t.endpoints.length) threadEps.set(t.id, t.endpoints);
-        queue.push(...r.next);
-        progress(cand.length, total, "후보 확인");
-        await WV.sleep(50);
-      }
-      pool = { size: cand.length, complete: !queue.length && !cancelled };
-      for (const top of WV.seededShuffle(cand, doc.meta.videoId)) {
-        if (comments.length >= max || cancelled) break;
-        seen.add(top.id);
-        comments.push(top);
-        const rq = includeReplies ? [...(threadEps.get(top.id) || [])] : [];
-        while (rq.length && comments.length < max && !cancelled) { // 뽑힌 스레드의 답글만 받는다
-          const r = WV.parseInnertubeComments(await callNext(rq.shift(), cfg), doc.id, { includeReplies: true });
-          for (const c of r.comments) { if (c.parentId && !seen.has(c.id) && comments.length < max) { seen.add(c.id); comments.push(c); } }
-          rq.push(...r.replies);
-          progress(comments.length, total, "답글 받는 중");
-          await WV.sleep(50);
-        }
-      }
-      complete = pool.complete && !cancelled;
+      // 고르게 무작위: 최신순(좋아요와 무관한 순서)으로 원댓글 후보를 뽑을 수의 3배까지 훑은 뒤, 씨앗이 정해진 무작위로 뽑는다(WV.sampleRandom).
+      // 후보가 영상의 모든 원댓글을 덮으면 전체에서 균등 추출이고, 댓글이 아주 많으면 '최근 후보 중 균등 추출'이 된다.
+      const page = async (ep, replies) => WV.parseInnertubeComments(await callNext(ep, cfg), doc.id, { includeReplies: replies || includeReplies });
+      const r = await WV.sampleRandom({
+        start: sortItems[1].serviceEndpoint, page, max, seed: doc.meta.videoId, includeReplies,
+        concurrency: 3, minGapMs: 100, isCancelled: () => cancelled,
+        onProgress: (n, t, phase) => progress(n, t, phase),
+      });
+      comments.push(...r.comments);
+      total = r.total ?? total;
+      pool = r.pool;
+      complete = r.complete;
     } else if (sort === "mix" && sortItems.length >= 2) {
       // 인기순 절반 + 최신순 절반: 좋아요 많은 댓글 쪽으로만 치우치지 않게
       await drain(sortItems[0].serviceEndpoint, Math.ceil(max / 2));

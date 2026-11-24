@@ -425,6 +425,119 @@ sample.onResponseReceivedEndpoints[0].reloadContinuationItemsCommand.continuatio
 const pr2 = WV.parseInnertubeComments(sample, "youtube:x", { now });
 assert.equal(JSON.stringify(pr2.threads.map((x) => [x.id, x.endpoints.length])), '[["Ugx1",1]]');
 
+// ---- 고르게 무작위 추출 (WV.sampleRandom): 가짜 YouTube로 공정성·동시 요청·물러나기 ----
+{
+  // tops개 원댓글, 한 쪽에 20개. i % 7 == 0 인 스레드는 답글 (i % 13) + 1개, 한 쪽에 5개씩(답글 더보기 사슬)
+  const fakeYT = ({ tops = 3000, fail = () => null, delay = true } = {}) => {
+    const st = { calls: 0, inflight: 0, peak: 0, replyCalls: 0 };
+    const nRep = (i) => (i % 7 === 0 ? (i % 13) + 1 : 0);
+    const page = async (ep) => {
+      st.calls++; st.inflight++; st.peak = Math.max(st.peak, st.inflight);
+      try {
+        if (delay) await new Promise((r) => setTimeout(r, (st.calls * 7919) % 4)); // 끝나는 순서를 섞는다
+        const err = fail(ep, st);
+        if (err) throw err;
+        const out = { comments: [], next: [], replies: [], threads: [], total: tops * 2, error: null };
+        if ("p" in ep) {
+          for (let i = ep.p * 20; i < Math.min(tops, ep.p * 20 + 20); i++) {
+            out.comments.push({ id: `t${i}`, parentId: null, rank: i });
+            const eps = nRep(i) ? [{ t: i, q: 0 }] : [];
+            out.replies.push(...eps);
+            out.threads.push({ id: `t${i}`, endpoints: eps });
+          }
+          if ((ep.p + 1) * 20 < tops) out.next.push({ p: ep.p + 1 });
+        } else {
+          st.replyCalls++;
+          const n = nRep(ep.t);
+          for (let j = ep.q * 5; j < Math.min(n, ep.q * 5 + 5); j++) out.comments.push({ id: `t${ep.t}.r${j}`, parentId: `t${ep.t}` });
+          if ((ep.q + 1) * 5 < n) out.replies.push({ t: ep.t, q: ep.q + 1 });
+        }
+        return out;
+      } finally { st.inflight--; }
+    };
+    return { page, st };
+  };
+  const noSleep = async () => {};
+  const run = (o, yt = fakeYT()) => WV.sampleRandom({ start: { p: 0 }, page: yt.page, max: 300, seed: "VID", minGapMs: 0, sleep: noSleep, ...o });
+
+  assert.equal(WV.poolLimit(100), 600);
+  assert.equal(WV.poolLimit(300), 900);
+  assert.equal(WV.poolLimit(1000), 3000);
+  assert.equal(WV.poolLimit(10000), 20000);
+
+  // 1) 예전 차례 방식(0.10.0 youtube.js)과 같은 결과: 같은 후보, 같은 섞기, 같은 순서로 담기
+  const reference = async (yt, max, limit) => {
+    const cand = [], eps = new Map(), q = [{ p: 0 }];
+    while (q.length && cand.length < limit) { const r = await yt.page(q.shift()); for (const c of r.comments) cand.push(c); for (const t of r.threads) if (t.endpoints.length) eps.set(t.id, t.endpoints); q.push(...r.next); }
+    const out = [];
+    for (const top of WV.seededShuffle(cand, "VID")) {
+      if (out.length >= max) break;
+      out.push(top);
+      const rq = [...(eps.get(top.id) || [])];
+      while (rq.length && out.length < max) { const r = await yt.page(rq.shift()); for (const c of r.comments) if (out.length < max) out.push(c); rq.push(...r.replies); }
+    }
+    return out.map((c) => c.id);
+  };
+  const ref = await reference(fakeYT(), 300, WV.poolLimit(300));
+  const y1 = fakeYT(), y3 = fakeYT();
+  const s1 = await run({ concurrency: 1 }, y1), s3 = await run({ concurrency: 3 }, y3);
+  assert.equal(JSON.stringify(s1.comments.map((c) => c.id)), JSON.stringify(ref), "동시 1개 = 예전 방식");
+  assert.equal(JSON.stringify(s3.comments.map((c) => c.id)), JSON.stringify(ref), "동시 3개여도 결과(순서까지) 같음");
+  assert.equal(s3.comments.length, 300);
+  assert.ok(s3.comments.some((c) => c.parentId), "답글도 담김");
+  assert.equal(s3.pool.size, 900); assert.equal(s3.pool.complete, false); assert.equal(s3.complete, false);
+  assert.ok(y3.st.peak <= 3 && y3.st.peak >= 2, `동시 요청 ${y3.st.peak}개 (최대 3)`);
+  assert.equal(y1.st.peak, 1);
+  assert.ok(y3.st.replyCalls - y1.st.replyCalls <= 3, `미리 받다 버리는 답글 요청은 동시 수(3) 이하 (${y1.st.replyCalls} → ${y3.st.replyCalls})`);
+
+  // 2) 공정성: 뽑힌 원댓글의 후보 안 위치(최신순 순번)가 앞쪽에 몰리지 않는다 — 다섯 구간이 각각 20% 안팎
+  const bins = [0, 0, 0, 0, 0];
+  let picked = 0, rankSum = 0;
+  for (let sd = 0; sd < 20; sd++) {
+    const r = await run({ seed: "v" + sd, includeReplies: false, max: 300 }, fakeYT({ delay: false }));
+    for (const c of r.comments) { bins[Math.floor((c.rank / r.pool.size) * 5)]++; picked++; rankSum += c.rank / r.pool.size; }
+  }
+  assert.ok(bins.every((b) => Math.abs(b / picked - 0.2) < 0.02), `구간별 비율 ${bins.map((b) => (b / picked).toFixed(3))}`);
+  assert.ok(Math.abs(rankSum / picked - 0.5) < 0.01, `평균 위치 ${(rankSum / picked).toFixed(3)}`);
+  // 후보가 영상 전체를 덮으면(원댓글 400개 < 900) 전체가 후보, '전체에서 추출'
+  const small = await run({}, fakeYT({ tops: 400 }));
+  assert.equal(small.pool.size, 400); assert.equal(small.pool.complete, true);
+  assert.equal(new Set(small.comments.filter((c) => !c.parentId).map((c) => c.id)).size, small.comments.filter((c) => !c.parentId).length, "원댓글 중복 없음");
+
+  // 3) 물러나기: 429가 두 번 나면 0.8초·1.6초 쉬고 다시, 그 뒤로는 동시 1개
+  const waits = [];
+  let n429 = 0;
+  const yb = fakeYT({ fail: (ep, st) => (ep.p === 5 && n429 < 2 ? (n429++, { status: 429 }) : ("t" in ep && st.inflight > 1 ? new Error("동시 요청이 1개로 줄지 않음") : null)) });
+  const sb = await run({ sleep: async (ms) => { waits.push(ms); } }, yb);
+  assert.deepEqual(waits, [800, 1600], `물러난 시간 ${waits}`);
+  assert.equal(JSON.stringify(sb.comments.map((c) => c.id)), JSON.stringify(ref), "다시 받아서 결과 같음");
+  assert.equal(sb.complete, false); // 후보가 900개에서 끊겼으므로(전체 아님)
+  // 다시 시도할 수 없는 실패(403)는 바로 멈춤
+  const tries403 = [];
+  await assert.rejects(WV.withBackoff(async () => { tries403.push(1); throw Object.assign(new Error("x"), { status: 403 }); }, { sleep: noSleep }));
+  assert.equal(tries403.length, 1, "403은 다시 시도하지 않음");
+  let t5 = 0;
+  assert.equal(await WV.withBackoff(async () => { if (++t5 < 3) throw Object.assign(new Error("x"), { status: 503 }); return "ok"; }, { sleep: noSleep }), "ok", "503은 다시 시도");
+  await assert.rejects(WV.withBackoff(async () => { throw Object.assign(new Error("x"), { status: 429 }); }, { sleep: noSleep }), "4번 다 실패하면 던짐");
+  // 첫 쪽부터 계속 실패하면 오류, 후보를 모은 뒤 실패하면 모은 데까지로 뽑고 '덜 모음'
+  await assert.rejects(run({}, fakeYT({ fail: () => ({ status: 500 }), delay: false })));
+  const partial = await run({}, fakeYT({ fail: (ep) => ("p" in ep && ep.p >= 10 ? { status: 500 } : null), delay: false }));
+  assert.equal(partial.pool.size, 200); assert.equal(partial.pool.complete, false); assert.equal(partial.complete, false);
+  // 한 스레드의 답글이 끝내 실패하면 그 답글만 빠지고 나머지는 그대로
+  const ft = small.comments.find((c) => c.parentId).parentId; // 뽑힌 스레드 하나
+  const rf = await run({}, fakeYT({ tops: 400, fail: (ep) => (`t${ep.t}` === ft ? { status: 500 } : null), delay: false }));
+  assert.ok(!rf.comments.some((c) => c.parentId === ft) && rf.comments.some((c) => c.id === ft), "원댓글은 남고 답글만 빠짐");
+  assert.ok(rf.comments.some((c) => c.parentId && c.parentId !== ft), "다른 스레드 답글은 그대로");
+  assert.equal(rf.complete, false);
+  // 요청 시작 간격: minGapMs를 지킨다
+  const starts = [];
+  const yg = fakeYT({ tops: 200 });
+  const pg = yg.page;
+  await WV.sampleRandom({ start: { p: 0 }, page: (e, r) => { starts.push(Date.now()); return pg(e, r); }, max: 40, seed: "g", minGapMs: 15 });
+  const gaps = starts.slice(1).map((t, i) => t - starts[i]);
+  assert.ok(Math.min(...gaps) >= 13, `요청 시작 간격 ${Math.min(...gaps)}ms ≥ 15ms(타이머 오차 2ms)`);
+}
+
 // ---- 연속 지도(UMAP)와 커뮤니티(Louvain), 가르는 키워드 ----
 const { fuzzyGraph, umapLayout, toPixels } = await import("../lib/umap.js");
 const { louvain } = await import("../lib/community.js");
