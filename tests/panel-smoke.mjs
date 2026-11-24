@@ -66,7 +66,7 @@ globalThis.__WV_TEST__ = (a) => (api = a);
 let topicLis = [], listOpts = [];
 byId("topics").replaceChildren = (...k) => { topicLis = k; };
 byId("clist-topic").replaceChildren = (...k) => { listOpts = k; };
-await import("../sidepanel/sidepanel.js");
+const panelMod = await import("../sidepanel/sidepanel.js");
 assert.ok(api, "패널 스크립트가 끝까지 실행됨");
 await new Promise((r) => setTimeout(r, 50)); // 모델·가중치 초기화 대기
 
@@ -255,4 +255,12 @@ assert.equal(api.state().S.comments.length, 40);
 assert.ok(api.state().listRows.every((i) => i < 40), "목록은 새 영상의 댓글만");
 assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안내 띠가 사라짐");
 
+// 스크립트 넣기 오류 안내: 잠든 탭 = '아직 안 열림', 네트워크 오류 페이지 = '새로고침' (같은 문구로 뭉뚱그리지 않음)
+{
+  const ex = panelMod.explainInjectError;
+  assert.match(ex(new Error("Cannot access contents of the page. Extension manifest must request permission")).message, /아직 열리지 않았어요/);
+  assert.match(ex(new Error("Frame with ID 0 is showing error page")).message, /제대로 열리지 않았어요/);
+  const other = new Error("Something else");
+  assert.equal(ex(other), other);
+}
 console.log("panel smoke passed");
