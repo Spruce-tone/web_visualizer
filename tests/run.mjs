@@ -1109,6 +1109,10 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.deepEqual(await sem.runChecked(gpuBad, ["a", "bad", "b"], async (xs) => { fb.push(...xs); return xs.map(() => [0, 1]); }), [[1, 0], [0, 1], [1, 0]]);
   assert.deepEqual(fb, ["bad"], "대체는 문제 줄만");
   await assert.rejects(sem.runChecked(gpuBad, ["bad"], async (xs) => xs.map(() => [NaN, 0])), /숫자가 아닌 값/, "대체도 NaN이면 오류");
+  // CPU 대체는 GPU·CPU가 같은 가중치 파일인 모델만 (Qwen3은 GPU q4f16 / CPU q8 → 대체 없음, 오류 → 문구 기준)
+  for (const [k, m] of Object.entries(sem.MODELS)) if (m.cpuFallback) assert.equal(m.dtype.webgpu, m.dtype.wasm, `${k}: 같은 가중치일 때만 CPU 대체`);
+  assert.equal(sem.MODELS.bekko.cpuFallback, true);
+  assert.ok(!sem.MODELS.qwen3.cpuFallback && !sem.MODELS.gemma.cpuFallback, "재지 않은 모델은 대체하지 않음");
 }
 
 console.log("all tests passed");
