@@ -854,6 +854,22 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   assert.ok(isl.gap < 3, `주제 사이 틈은 점 간격 3배 미만 (${isl.gap.toFixed(2)})`);
   // 멈출 때까지 틱 수: 거의 자리 잡은 뒤(alpha < 0.1)는 빨리 식힌다 → 0.6에서 0.02까지 약 150틱 (예전 0.985만 쓰면 225틱)
   { const L = createLayout(init, es, { groups: grp, cohesion: 0.05, alpha: 0.6 }); let t = 0; while (L.tick()) t++; assert.ok(t > 120 && t < 170, `멈출 때까지 ${t}틱`); }
+  // 세밀도를 바꿔 주제가 갈라지면: 이전 자리를 이어받아 덜 움직이고, 갈라진 주제는 그래도 벌어진다
+  {
+    const nn = (L) => { const v = Array.from({ length: N }, (_, i) => { let b = Infinity; for (let j = 0; j < N; j++) if (j !== i) b = Math.min(b, Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j])); return b; }).sort((p, q) => p - q); return v[N >> 1]; };
+    const split = grp.map((g, i) => (g === 0 && i % 8 < 4 ? G : g)); // 주제 0을 반으로
+    const silOf = (L, lab) => { const K = G + 1; let s2 = 0; for (let i = 0; i < N; i++) { const sum = new Float64Array(K), cnt = new Float64Array(K); for (let j = 0; j < N; j++) if (j !== i) { sum[lab[j]] += Math.hypot(L.x[i] - L.x[j], L.y[i] - L.y[j]); cnt[lab[j]]++; } const a = sum[lab[i]] / cnt[lab[i]]; let b = Infinity; for (let g = 0; g < K; g++) if (g !== lab[i] && cnt[g]) b = Math.min(b, sum[g] / cnt[g]); s2 += (b - a) / Math.max(a, b); } return s2 / N; };
+    const before = silOf(strong, split);
+    const R = createLayout(init, es, { groups: split, cohesion: 0.05, keep: strong, alpha: 0.25 });
+    for (let f = 0; f < 3000 && R.tick(); f++);
+    const m = nn(strong);
+    const mv = Array.from({ length: N }, (_, i) => Math.hypot(R.x[i] - strong.x[i], R.y[i] - strong.y[i]) / m);
+    const same = mv.filter((_, i) => grp[i] !== 0).sort((p, q) => p - q);
+    assert.ok(silOf(R, split) > before + 0.03, `갈라진 주제가 벌어진다 (실루엣 ${before.toFixed(2)} → ${silOf(R, split).toFixed(2)})`);
+    // 이전 자리 당김(REGROUP_HOLD)이 없으면 이동 중앙값 0.50, 그대로인 주제 0.34 (점 간격 배수)
+    const all = [...mv].sort((p, q) => p - q)[N >> 1];
+    assert.ok(all < 0.42 && same[same.length >> 1] < 0.3, `덜 움직인다 (중앙값 ${all.toFixed(2)}, 그대로인 주제 ${same[same.length >> 1].toFixed(2)} × 점 간격)`);
+  }
   // 어려운 경우: 주제 크기 차이가 큼 / 주제 사이 선이 거의 없음 / 선이 적은 주제 / 둘 다
   const hard = (sizes, { cross = 2, sparse = -1 } = {}) => {
     let sd = 11; const r = () => ((sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648);
