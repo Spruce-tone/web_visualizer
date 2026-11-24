@@ -959,6 +959,12 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   const sem = await import("../lib/embed/semantic.js");
   assert.equal(await sem.resolveModel("auto"), "bekko");
   assert.equal(await sem.resolveModel("gemma"), "gemma", "직접 고르면 그대로");
+  // 묶음에서 NaN이 나온 줄만 하나씩 다시 돌린다 (WebGPU 패딩 문제), 그래도 NaN이면 오류
+  const calls = [];
+  const flaky = async (texts) => { calls.push(texts.length); return texts.map((x) => (texts.length > 1 && x === "long" ? [NaN, 1] : [1, 0])); };
+  assert.deepEqual(await sem.runChecked(flaky, ["a", "long", "b"]), [[1, 0], [1, 0], [1, 0]]);
+  assert.deepEqual(calls, [3, 1], "NaN 줄만 따로 한 번");
+  await assert.rejects(sem.runChecked(async (x) => x.map(() => [NaN]), ["a"]), /숫자가 아닌 값/);
 }
 
 console.log("all tests passed");
