@@ -216,12 +216,13 @@
     setTimeout(() => (el.style.outlineColor = "transparent"), 3000);
   }
 
-  /** lc 값이 정확히 일치하는 댓글 요소 (접두어만 같은 답글 링크에 속지 않게 값 비교) */
+  /** 화면에 보이고 lc 값이 정확히 일치하는 댓글 요소 (접두어만 같은 답글 링크에 속지 않게 값 비교) */
   function findCommentEl(id) {
     for (const a of document.querySelectorAll(`ytd-comments a[href*="lc="]`)) {
       let lc = null;
       try { lc = new URL(a.getAttribute("href"), location.origin).searchParams.get("lc"); } catch { /* 무시 */ }
-      if (lc === id) { const el = a.closest(SEL.comment); if (el) return el; }
+      // 숨은 댓글 패널(넓은 화면의 engagement panel)에도 같은 댓글이 있을 수 있다 → 화면에 보이는 것만
+      if (lc === id) { const el = a.closest(SEL.comment); if (el && el.getClientRects().length) return el; }
     }
     return null;
   }
@@ -321,6 +322,7 @@
   window.addEventListener("hashchange", devOpen);
   devOpen();
 
+  const BRIDGE_V = 2; // content/page-bridge.js 의 V와 같아야 한다
   /** 페이지 쪽 다리(page-bridge.js)에 부탁하고 답을 기다린다. 다리가 없으면 "timeout". */
   function askBridge(name, payload, timeoutMs) {
     return new Promise((resolve) => {
@@ -359,12 +361,12 @@
     if (!section) return { ok: false, reason: "이 페이지에서 댓글 영역을 찾지 못했어요." };
     section.scrollIntoView({ block: "start" }); // 댓글 영역이 화면에 와야 YouTube가 댓글과 정렬 버튼을 불러온다
     say("댓글 영역에서 그 댓글을 불러오는 중");
-    const shown = await askBridge("wv-show-comment", { videoId: videoId(), id }, 14000);
+    const shown = await askBridge(`wv-show-comment-v${BRIDGE_V}`, { videoId: videoId(), id }, 14000);
     if (shown === "ok" && (await waitAndHighlight(id, 10000))) return { ok: true, via: "댓글 영역만 다시 불러옴" };
     if (findCancelled) return { ok: false, reason: "찾기를 멈췄어요." };
     const v = document.querySelector("video");
     const t = v ? v.currentTime : 0, paused = v ? v.paused : true;
-    const nav = await askBridge("wv-navigate", { videoId: videoId(), id }, 600);
+    const nav = await askBridge(`wv-navigate-v${BRIDGE_V}`, { videoId: videoId(), id }, 600);
     if (nav === "ok") { const r = await waitForLinked({ id, t, paused }); return { ...r, via: "YouTube 내부 이동", detail: shown }; }
     return { ok: false, need: "navigate", t, paused, detail: `${shown}/${nav}` };
   }

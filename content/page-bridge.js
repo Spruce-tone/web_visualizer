@@ -7,8 +7,10 @@
 //   → 실제 페이지에서 확인: 약 1~2초, 영상 계속 재생, 광고·새로고침 없음, 답글도 '하이라이트 답글'로 뜸
 // wv-navigate      (예비): YouTube 내부 이동(yt-navigate). 영상이 다시 불러와지고 광고가 나올 수 있어 기본으로 쓰지 않는다.
 (() => {
-  if (window.__wvBridge) return;
-  window.__wvBridge = true;
+  // 다리 판(版). 고칠 때마다 올린다: 업데이트 전에 열린 탭에는 옛 다리가 남아 있으므로, 이벤트 이름에 판을 붙여 옛 다리가 새 부탁에 답하지 않게 한다.
+  const V = 2;
+  if (window.__wvBridgeV === V) return;
+  window.__wvBridgeV = V;
 
   const okIds = (videoId, id) => /^[\w-]{11}$/.test(videoId) && /^[\w.-]{10,120}$/.test(id);
   // YouTube가 댓글 시각 링크에 쓰는 params: protobuf { 15: 댓글 id, 36: { 24: 0 } } → base64
@@ -16,7 +18,10 @@
   const ack = (name, detail) => document.dispatchEvent(new CustomEvent(name, { detail }));
   const waitFor = async (fn, ms) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v || Date.now() > end) return v; await new Promise((r) => setTimeout(r, 200)); } };
 
+  // 응답에는 댓글 목록 토큰이 둘 있다: 영상 아래 댓글(targetId "comments-section", 그 댓글 id가 들어 있음)과
+  // 넓은 화면에서는 숨어 있는 댓글 패널("engagement-panel-comments-section"). 숨은 패널 토큰을 쓰면 결과가 안 보이는 곳에 그려진다.
   function findCommentToken(obj) {
+    const found = [];
     const stack = [obj];
     while (stack.length) {
       const cur = stack.pop();
@@ -30,21 +35,21 @@
           if (Array.isArray(c)) { for (const x of c) inner.push(x); continue; }
           if (!c || typeof c !== "object") continue;
           const t = c.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token;
-          if (t) return t;
+          if (t) { found.push({ t, main: sec.targetId === "comments-section" }); break; }
           for (const v of Object.values(c)) inner.push(v);
         }
       }
       for (const v of Object.values(cur)) stack.push(v);
     }
-    return null;
+    return (found.find((f) => f.main) || found[0])?.t || null;
   }
 
-  document.addEventListener("wv-show-comment", async (ev) => {
+  document.addEventListener(`wv-show-comment-v${V}`, async (ev) => {
     let result = "error";
     try {
       const { videoId, id } = JSON.parse(ev.detail);
       if (!okIds(videoId, id)) throw new Error("bad id");
-      const menu = await waitFor(() => { const m = document.querySelector("ytd-comments yt-sort-filter-sub-menu-renderer"); return m?.data?.subMenuItems?.[0]?.serviceEndpoint?.continuationCommand ? m : null; }, 9000);
+      const menu = await waitFor(() => { const m = document.querySelector("ytd-comments#comments yt-sort-filter-sub-menu-renderer"); return m?.data?.subMenuItems?.[0]?.serviceEndpoint?.continuationCommand ? m : null; }, 9000);
       const cfg = window.ytcfg;
       if (!menu) result = "no-menu";
       else if (!cfg?.get?.("INNERTUBE_CONTEXT")) result = "no-config";
@@ -70,10 +75,10 @@
     } catch (e) {
       result = "error";
     }
-    ack("wv-show-comment-ack", result);
+    ack(`wv-show-comment-v${V}-ack`, result);
   });
 
-  document.addEventListener("wv-navigate", (ev) => {
+  document.addEventListener(`wv-navigate-v${V}`, (ev) => {
     let result = "no-app";
     try {
       const { videoId, id } = JSON.parse(ev.detail);
@@ -90,6 +95,6 @@
     } catch (e) {
       result = "error";
     }
-    ack("wv-navigate-ack", result);
+    ack(`wv-navigate-v${V}-ack`, result);
   });
 })();
