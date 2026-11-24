@@ -6,7 +6,7 @@
 ## 방향 (2026-11-24 결정)
 - **저장하지 않는다.** 문서/댓글/임베딩은 사이드 패널 메모리에만. IndexedDB·storage 권한 쓰지 않음.
 - **임베딩 우선, 속도 우선.** 임계값 변경 등 UI 조작은 임베딩 재계산 없이 캐시된 top-k 이웃으로 처리.
-- **역할 분리 (v0.2)**: 문구 임베딩(n-gram 해싱) = 복붙·템플릿 의심 신호 / 의미 임베딩(자동: GPU → EmbeddingGemma-300M, CPU → Bekko a25m / 선택 Qwen3-Embedding-0.6B) = 지도 배치·주제 묶음. 의미 모델 실패 시 문구 임베딩으로 대체.
+- **역할 분리 (v0.2)**: 문구 임베딩(n-gram 해싱) = 복붙·템플릿 의심 신호 / 의미 임베딩(자동: Bekko a25m, GPU 있으면 GPU로 — 검증 세트 근거 `docs/validation.md` / 선택 EmbeddingGemma-300M·Qwen3-Embedding-0.6B) = 지도 배치·주제 묶음. 의미 모델 실패 시 문구 임베딩으로 대체.
 - 의미 유사도 임계값은 모델 분포에 맞춰 적응형(`adaptiveThreshold`)으로 기본값 설정.
 - **설치는 릴리스 zip 하나로.** main 푸시 → GitHub Actions가 vendor 포함 zip을 `latest-build` 릴리스에 올림.
 
@@ -24,7 +24,8 @@
 - v0.9.1 ✅ 키워드 품질: 큰 주제도 키워드(최소 빈도 16개 이하 2번, 그 위 max(3, 3%) + 초기하 z≥1.96 + 2배 이상 또는 쏠림 0.4, z 순), 근거 없는 주제는 이름을 비움("주제 N"), 흔한 어미·복수 떼기, 답글 @아이디 제외 / 같은 키워드 주제 합치기를 `lib/community.js` `mergeSameKeywordTopics`로(앞 두 키워드 같으면, 첫 키워드만 같으면 SNN 연결비 ≥ 세밀도×0.5), 겹침은 합친 뒤 계산 / 합성 한국어 댓글 자료 `tests/ko-topics.mjs`
 - v0.9.2 ✅ 지도: 키워드로 끈 주제는 힘 계산에서 빠져 커서를 그대로 따르고 놓은 자리에 머묾(주제 그대로면 다시 그려도 유지, '고정 풀기'로 해제), 끄는 중엔 지도 밖으로 나가도 계속 / 주제를 아는 힘 배치(`lib/layout.js`): 주제 사이 선 당김 ×0.35·길이 ×1.8, 응집 0.05, 주제 중심 밀어내기, 닿지 않은 주제 무리는 가장 가까운 무리 쪽으로(섬 방지, 끄는·옮긴 주제는 제외), 선 줄이기(`thinEdges`)가 끊은 곳 다시 잇기. 2D 실루엣 1,000개 0.11~0.18 → 0.37, 3,000개 0.07 → 0.23~0.28, 덩어리 1개 유지(`qa/2026-11-25/LAYOUT-PLAN.md`)
 - v0.9.3 ✅ 정리: 열리지 않은 탭(세션 복원·잠든 탭)은 한국어 안내 / 댓글 찾기는 `ytd-comments#comments` 안에서만, 보이는지는 `checkVisibility`+크기로 / 토큰 고르기를 `content/parse.js` `findCommentToken`으로(실제 /next 응답 모양 fixtures로 테스트, 다리는 부를 때 찾음 — manifest 메인 월드 항목에 parse.js를 넣어도 Edge에선 안 들어감) / 다리 판 일치 테스트 / 주제 클릭 시 '지도에서 고른 댓글' 중복 항목 없앰 / 모델 크기 안내를 실제 내려받는 크기로 / `calibration/weights.json`은 확장 안에 있을 때만 읽음(콘솔 404 없음) / 지도: 지도 밖에서 놓으면 hover 지움, 옮긴 주제 안 점 고정·풀기에 주제가 튀지 않음, 주제 반경에서 고정 점 제외
-- 다음: fixtures 검증 세트 수집 후 `npm run evaluate`, 실제 공개 데이터로 보정 실행, Web Worker 분리
+- v0.10.0 ✅ 검증 세트(6개 분류 × 5개 영상, 댓글 22,542개, 원문은 로컬 `fixtures/set/`만, 목록 `fixtures/validation-set.json`) + `npm run evaluate` 모델·기준 비교(`docs/validation.md`) / 복붙 의심: 평균 유사도를 묶음 안 모든 쌍으로, 사슬 묶음(전체 평균 < min(문구 기준, 0.6))은 점수 없음 → 치우침 점검 통과(music 15.0% → 1.5%) / 자동 모델 = Bekko(GPU에서 Gemma보다 약 10배 빠르고 지도 같음, 이름 없는 주제 적음), WebGPU에서 NaN 나온 줄은 하나씩 다시 계산 / 키워드: z에 더해 초기하 정확 검정 / 주제 계산을 `lib/topics.js`로 / 다리 v3, 메인 월드 전역은 `__wvParse`만 / 네트워크 오류 페이지 안내 분리 / 겹침 기준·지도 상수는 그대로(30개 영상 근거)
+- 다음: 공개 데이터 보정(데이터 21GB parquet → 변환 필요), Web Worker 분리, 욕설·별명 키워드를 가릴지 결정
 - M3 사이트 어댑터 추가 (네이버 뉴스, 커뮤니티 1곳, 일반 기사)
 
 ## 참고
@@ -52,7 +53,7 @@
 - 분석/임베딩은 `lib/` 에서 사이트 무관하게. 새 함수에는 `tests/run.mjs`에 테스트 추가. 패널 스크립트를 고치면 `tests/panel-smoke.mjs`가 통과해야 한다.
 - "조작" 판정 문구 금지 → "의심 신호 점수 + 근거"로 표시.
 - 원격 코드 로드 금지(MV3). 외부 라이브러리는 `vendor/`로 복사해 번들.
-- 실제 사이트 대신 `fixtures/*.json` 으로 분석 개발.
+- 실제 사이트 대신 `fixtures/*.json` 으로 분석 개발. 실제 댓글 원문·작성자는 커밋하지 않는다(`fixtures/set/`, gitignore).
 
 ## 공통 스키마
 Doc { id, site, url, title, author, publishedAt, text, meta, extractedAt }
