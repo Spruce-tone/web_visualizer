@@ -384,6 +384,13 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     showTooltip(h, mx, my);
   });
 
+  // 창 밖에서 버튼을 놓으면 mouseup이 오지 않는다 → 끌던 주제가 힘 계산에서 빠진 채 굳지 않게 끝낸다
+  window.addEventListener("blur", () => {
+    if (drag?.type !== "label" || !data) return;
+    data.layout.endGroupDrag?.();
+    drag = null;
+    animate();
+  });
   window.addEventListener("mouseup", () => {
     if (!drag || !data) { drag = null; return; }
     if (drag.type === "node" && !drag.moved) {

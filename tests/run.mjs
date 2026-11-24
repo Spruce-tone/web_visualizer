@@ -603,9 +603,17 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   for (let i = 0; i < 400 && K2.tick(); i++);
   const c3 = cen(K2);
   assert.ok(Math.hypot(c3[0] - c1[0], c3[1] - c1[1]) < 1, "다시 그려도 옮긴 주제 자리를 이어받는다");
-  // '고정 풀기'
+  // 주제가 바뀌면(세밀도 변경 등) 옮긴 자리를 버린다
+  const other = Array.from(lvS.ids, (g, i) => (i === mem[0] ? (g + 1) % 3 : g));
+  const K3 = createLayout(three.map(() => [0, 0]), [], { groups: other, cohesion: 0.012, keep: L, alpha: 0.3 });
+  assert.equal(K3.held.size, 0, "주제가 바뀌면 옮긴 자리를 이어받지 않는다");
+  // '고정 풀기' 뒤에는 다시 힘을 받아 움직인다 (가운데 끌림·이웃 선)
   L.releaseGroups();
   assert.equal(L.held.size, 0);
+  L.reheat(0.5);
+  for (let i = 0; i < 400 && L.tick(); i++);
+  const c4 = cen(L);
+  assert.ok(Math.hypot(c4[0] - c1[0], c4[1] - c1[1]) > 20, "고정을 풀면 주제가 다시 움직인다");
 }
 {
   // 주제를 아는 배치: 이웃 선의 2/5가 다른 주제로 가는 섞인 그래프에서도 주제가 갈리되, 섬으로 끊기지 않는다
