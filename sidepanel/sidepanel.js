@@ -5,7 +5,7 @@
 // - 의미 임베딩(자동 선택): 지도 배치, 주제 묶음, '같은 주장 다른 표현'
 // - 평가 표현(어조): 설명용 탭과 색칠에만. 점수·배치에는 쓰지 않는다
 import { dot, edgesFromNeighbors, clustersFromEdges, packVectors, unpackVectors } from "../lib/vec.js";
-import { analyzeComments, topicsAt, presetCounts, toneWords, FIRST_RES } from "../lib/pipeline.js";
+import { analyzeComments, topicsAt, presetCounts, toneWords, viewVectors, FIRST_RES } from "../lib/pipeline.js";
 import { createLayout, thinEdges } from "../lib/layout.js";
 import { timeHistogram } from "../lib/analyze.js";
 import { clusterSignals } from "../lib/signals.js";
@@ -143,13 +143,88 @@ function setBusy(busy) {
   if (!busy) refreshWeightsOption();
 }
 
-/** 분석 계산 (lib/pipeline.js). onStatus로 진행 문구를 받는다 */
+// ---------- 분석 Worker ----------
+// 무거운 계산(임베딩·이웃·지도 첫 배치·주제 나누기)은 Worker(lib/analysis-worker.js)에서 돌려 패널이 멈추지 않게 한다.
+// Worker를 만들 수 없거나 Worker가 죽으면 같은 계산(lib/pipeline.js)을 여기서 돌린다(예전 방식). 결과는 같다.
+let worker = null;
+let workerBroken = !!globalThis.__WV_NO_WORKER__ || typeof Worker === "undefined";
+let workerSeq = 0;
+const workerCalls = new Map(); // run → {resolve, reject, onStatus}
+class WorkerGone extends Error {}
+function getWorker() {
+  if (workerBroken) return null;
+  if (worker) return worker;
+  try {
+    worker = new Worker(new URL("../lib/analysis-worker.js", import.meta.url), { type: "module" });
+  } catch (e) {
+    console.warn("[WV] worker 만들기 실패 → 패널에서 계산", e);
+    workerBroken = true;
+    return null;
+  }
+  worker.onmessage = ({ data: m }) => {
+    const call = workerCalls.get(m.run);
+    if (!call) return;
+    if (m.type === "status") { call.onStatus?.(m.text); return; }
+    workerCalls.delete(m.run);
+    if (m.type === "error") { const e = new Error(m.message); e.code = m.code; call.reject(e); } else call.resolve(m);
+  };
+  const die = (e) => {
+    console.warn("[WV] worker 오류 → 패널에서 계산", e);
+    workerBroken = true;
+    worker?.terminate(); worker = null;
+    for (const c of workerCalls.values()) c.reject(new WorkerGone("worker"));
+    workerCalls.clear();
+  };
+  worker.onerror = (e) => { e.preventDefault?.(); die(e.message || e); };
+  worker.onmessageerror = die;
+  return worker;
+}
+function callWorker(msg, onStatus) {
+  const w = getWorker();
+  if (!w) return Promise.reject(new WorkerGone("none"));
+  const run = ++workerSeq;
+  return new Promise((resolve, reject) => {
+    workerCalls.set(run, { resolve, reject, onStatus });
+    w.postMessage({ ...msg, run });
+  });
+}
+
+/** 분석 계산 (lib/pipeline.js) — Worker에서, 안 되면 여기서. onStatus로 진행 문구를 받는다 */
 async function analyze(input, onStatus) {
+  try {
+    const { run, result } = await callWorker({ type: "analyze", ...input }, onStatus);
+    return { ...result, lexVecs: viewVectors(result.lexVecs), workerKey: run };
+  } catch (e) {
+    if (!(e instanceof WorkerGone)) throw e;
+  }
   const embed = async (texts, st) => {
     const r = await semantic.semanticEmbed(texts, { model: input.mode, onStatus: st });
     return { vecs: r.vecs, where: r.where, modelName: semantic.MODELS[r.model].name };
   };
   return analyzeComments(input, { embed, onStatus });
+}
+
+/** 세밀도를 바꾸면 주제를 다시 나눈다. Worker가 있으면 거기서 계산해 캐시에 넣고, 끝나면 다시 그린다 */
+async function retopic() {
+  if (!S) return;
+  const v = Number($("res-range").value) || 0;
+  if (!topicCache.has(v) && !workerBroken) {
+    const mine = S;
+    const data = () => ({ n: S.comments.length, graphEdges: S.graphEdges, short: S.short, texts: S.comments.map((c) => c.text) });
+    S.workerKey ??= "r" + ++workerSeq; // 크게 보기로 넘겨받은 결과: Worker가 아직 모르는 입력
+    try {
+      let r = await callWorker({ type: "topics", key: S.workerKey, v }).catch((e) => {
+        if (e.code === "no-input") return callWorker({ type: "topics", key: S.workerKey, v, data: data() });
+        throw e;
+      });
+      if (S !== mine) return;
+      topicCache.set(v, r.part);
+    } catch (e) {
+      if (!(e instanceof WorkerGone)) console.warn("[WV] worker 주제 나누기 실패 → 패널에서 계산", e);
+    }
+    if (S !== mine || (Number($("res-range").value) || 0) !== v) return; // 그 사이 또 바뀌었으면 마지막 요청이 그린다
+  }
+  rebuild();
 }
 
 async function run(type, extra) {
@@ -167,13 +242,14 @@ async function run(type, extra) {
     if (doc.meta.collection?.limited) notes.push("YouTube가 요청을 계속 받지 않아서(요청 제한이나 서버 오류) 중간에 멈추고, 모은 만큼만 분석했어요. 잠시 뒤 다시 모으면 더 받을 수 있어요");
 
     const n = comments.length;
-    const mode = $("mode").value;
+    const mode = String($("mode").value);
     const A = await analyze({ doc, comments, useSemantic: mode !== "fast" && !!semantic, mode }, (m) => setStatus(m, "busy"));
     notes.push(...A.notes);
 
     S = {
       tabId: tab.id, doc, comments, lexVecs: A.lexVecs, lexNbrs: A.lexNbrs, semNbrs: A.semNbrs, x: A.x, y: A.y, graphEdges: A.graphEdges,
       idx: A.idx, short: A.short, semantic: A.semantic, modelName: A.modelName, where: A.where, para: A.para, co: A.co, tone: A.tone, presets: A.presets,
+      workerKey: A.workerKey,
     };
     topicCache = new Map([[FIRST_RES, A.firstTopics]]);
     memory.add(doc, comments);
@@ -443,7 +519,7 @@ function renderPresets() {
     b.type = "button";
     b.dataset.value = v;
     b.append(el("span", "", label), el("small", "", `약 ${cnt}개`));
-    b.onclick = () => { setRes(v); rebuild(); };
+    b.onclick = () => { setRes(v); retopic(); };
     return b;
   }));
 }
@@ -455,7 +531,7 @@ function syncGrain() {
 function stepTopics(delta) {
   if (!S) return;
   setRes((Number($("res-range").value) || 0) + delta * 5);
-  rebuild();
+  retopic();
 }
 
 // ---------- 목록 ----------
@@ -904,7 +980,7 @@ function renderTags(counts = []) {
 function snapshot() {
   if (shown === "comments") savedTags = Array.from(graph.tagsArray());
   const L = V?.commentLayout;
-  const { names, lexVecs, ...plain } = S; // Map은 넘기지 않는다. 벡터는 문자열 하나로 묶어 넘긴다
+  const { names, lexVecs, workerKey, ...plain } = S; // Map은 넘기지 않는다. 벡터는 문자열 하나로 묶어 넘긴다
   return {
     S: plain, lexVecs: lexVecs ? packVectors(lexVecs) : null, tagDefs,
     res: $("res-range").value, thLex: $("th-lex").value,
@@ -965,7 +1041,7 @@ $("btn-wide").onclick = async () => {
 };
 $("th-lex").oninput = () => { $("th-lex-val").textContent = Number($("th-lex").value).toFixed(2); };
 $("th-lex").onchange = () => rebuild();
-$("res-range").onchange = () => rebuild();
+$("res-range").onchange = () => retopic();
 setSlider("th-lex", 0.6);
 $("k-minus").onclick = () => stepTopics(-1);
 $("k-plus").onclick = () => stepTopics(+1);

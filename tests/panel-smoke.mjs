@@ -66,6 +66,26 @@ globalThis.__WV_TEST__ = (a) => (api = a);
 let topicLis = [], listOpts = [];
 byId("topics").replaceChildren = (...k) => { topicLis = k; };
 byId("clist-topic").replaceChildren = (...k) => { listOpts = k; };
+// 가짜 Worker: 실제 Worker 처리 함수(lib/worker-core.js)를 같은 스레드에서 비동기로 부르고, 메시지는 structuredClone으로 오간다.
+// workerMode = "crash"면 Worker가 죽은 것처럼 onerror → 패널이 같은 계산을 직접 해야 한다(대체 경로).
+const { createHandler } = await import("../lib/worker-core.js");
+let workerMode = "ok";
+const workerMsgs = [];
+globalThis.Worker = class {
+  constructor(url, opts) {
+    assert.ok(String(url).endsWith("/lib/analysis-worker.js") && opts?.type === "module", "같은 확장 안의 module Worker");
+    this.h = createHandler({ loadSemantic: async () => { throw new Error("Node에는 의미 모델이 없음"); } });
+  }
+  postMessage(m) {
+    const msg = structuredClone(m);
+    workerMsgs.push(msg.type);
+    setTimeout(() => {
+      if (workerMode === "crash") { this.onerror?.({ message: "죽음", preventDefault() {} }); return; }
+      this.h(msg, (out, tr) => this.onmessage?.({ data: structuredClone(out, { transfer: tr || [] }) }));
+    }, 0);
+  }
+  terminate() {}
+};
 const panelMod = await import("../sidepanel/sidepanel.js");
 assert.ok(api, "패널 스크립트가 끝까지 실행됨");
 await new Promise((r) => setTimeout(r, 50)); // 모델·가중치 초기화 대기
@@ -80,6 +100,30 @@ assert.ok(V.signals.some((s) => s.state === "scored" && s.score >= 50), "복붙 
 assert.ok(V.aSignals.find((a) => a.key === "@repeater").score >= 30, "되풀이 작성자가 점수를 받음");
 assert.ok(V.piles.length >= 1, "비슷한 답글이 몰린 스레드를 찾음");
 assert.equal(api.state().shown, "comments");
+assert.deepEqual(workerMsgs, ["analyze"], "분석은 Worker에서");
+
+// 1-1) 세밀도 바꾸기도 Worker에서 계산하고, Worker가 죽으면 패널에서 같은 계산을 한다 (결과 같음)
+{
+  const fp = () => { const { S, V } = api.state(); return JSON.stringify({ e: S.graphEdges, x: S.x, ln: S.lexNbrs, ids: Array.from(V.topic.ids), kw: V.topics.map((t) => t.keywords), sg: V.signals.map((x) => [x.state, x.score, x.indices]), pr: S.presets, tw: S.tone.words, lx: S.lexVecs.slice(0, 5).map((v) => Array.from(v)) }); };
+  const viaWorker = fp();
+  byId("res-range").value = 75;
+  await byId("res-range").onchange();
+  assert.deepEqual(workerMsgs, ["analyze", "topics"], "세밀도를 바꾸면 Worker가 주제를 나눈다");
+  const k75 = api.state().V.K;
+  byId("res-range").value = 50;
+  await byId("res-range").onchange();
+  assert.equal(workerMsgs.length, 2, "처음 세밀도는 분석 때 함께 계산해 두었다");
+  workerMode = "crash";
+  await byId("btn-all").onclick();
+  assert.ok(String(byId("status").textContent).includes("분석 완료"), "Worker가 죽어도 분석이 끝난다");
+  assert.equal(fp(), viaWorker, "Worker와 패널 계산 결과가 같다");
+  byId("res-range").value = 75;
+  await byId("res-range").onchange();
+  assert.equal(api.state().V.K, k75, "세밀도 다시 나누기도 같다");
+  byId("res-range").value = 50;
+  await byId("res-range").onchange();
+  ({ S, V } = api.state());
+}
 
 // 주제: 이웃 그래프의 커뮤니티로 나뉘고, 짧은 반응은 따로 모인다. 지도 좌표는 댓글마다 하나씩.
 assert.ok(V.K >= 2 && V.topics.length >= V.K, "주제가 여러 개로 나뉨");

@@ -1163,4 +1163,33 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.deepEqual(P.viewVectors(P.flattenVectors([])), []);
 }
 
+// 분석 Worker 처리 함수 (lib/worker-core.js)
+{
+  const { createHandler } = await import("../lib/worker-core.js");
+  const P = await import("../lib/pipeline.js");
+  const h = createHandler({ loadSemantic: async () => ({ MODELS: { m: { name: "가짜" } }, semanticEmbed: async (texts) => ({ vecs: (await import("../lib/embed/hash.js")).hashEmbed(texts, { dim: 64 }), where: "GPU", model: "m" }) }) });
+  const wc = Array.from({ length: 40 }, (_, i) => ({ id: "w" + i, parentId: null, author: "a" + (i % 7), authorId: "@a" + (i % 7), text: ["고양이 사료 추천 부탁해요 " + i, "주식 시장 전망 궁금합니다 " + i, "축구 경기 결과 대박 " + i][i % 3], likes: i, createdAtRaw: "", createdAtApprox: null }));
+  const out = [];
+  const post = (m, tr) => out.push({ m, tr });
+  await h({ type: "analyze", run: 7, doc: { title: "t", text: "" }, comments: wc, useSemantic: true, mode: "auto" }, post);
+  const done = out.find((o) => o.m.type === "done");
+  assert.ok(out.some((o) => o.m.type === "status" && o.m.run === 7), "진행 문구를 보낸다");
+  assert.equal(done.m.run, 7); assert.equal(done.m.result.where, "GPU"); assert.equal(done.m.result.modelName, "가짜");
+  assert.deepEqual(done.tr, [done.m.result.lexVecs.flat.buffer], "문구 벡터는 transfer로");
+  const direct = await P.analyzeComments({ doc: { title: "t", text: "" }, comments: wc, useSemantic: true }, { embed: async (x) => ({ vecs: (await import("../lib/embed/hash.js")).hashEmbed(x, { dim: 64 }), where: "GPU", modelName: "가짜" }), pause: async () => {} });
+  assert.deepEqual(done.m.result.graphEdges, direct.graphEdges, "Worker와 직접 계산이 같다");
+  assert.deepEqual(done.m.result.firstTopics, direct.firstTopics);
+  out.length = 0;
+  await h({ type: "topics", run: 8, key: 7, v: 80 }, post);
+  assert.equal(out[0].m.type, "topics");
+  assert.deepEqual(out[0].m.part, P.topicsAt({ n: 40, graphEdges: direct.graphEdges, short: direct.short, texts: wc.map((c) => c.text) }, 80));
+  out.length = 0;
+  await h({ type: "topics", run: 9, key: "모름", v: 50 }, post);
+  assert.equal(out[0].m.code, "no-input", "모르는 입력이면 data를 달라고 한다");
+  await h({ type: "topics", run: 10, key: "모름", v: 50, data: { n: 40, graphEdges: direct.graphEdges, short: direct.short, texts: wc.map((c) => c.text) } }, post);
+  assert.deepEqual(out[1].m.part, direct.firstTopics);
+  await h({ type: "?", run: 11 }, post);
+  assert.equal(out[2].m.type, "error");
+}
+
 console.log("all tests passed");
