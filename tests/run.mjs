@@ -852,6 +852,8 @@ assert.ok(Math.abs(fl.x[0] - (before0 + 30)) < 1e-3, "키워드를 끌면 그 �
   const isl = islandsOf(strong, grp);
   assert.equal(isl.comps, 1, "섬으로 끊기지 않는다 (근접 덩어리 하나)");
   assert.ok(isl.gap < 3, `주제 사이 틈은 점 간격 3배 미만 (${isl.gap.toFixed(2)})`);
+  // 멈출 때까지 틱 수: 거의 자리 잡은 뒤(alpha < 0.1)는 빨리 식힌다 → 0.6에서 0.02까지 약 150틱 (예전 0.985만 쓰면 225틱)
+  { const L = createLayout(init, es, { groups: grp, cohesion: 0.05, alpha: 0.6 }); let t = 0; while (L.tick()) t++; assert.ok(t > 120 && t < 170, `멈출 때까지 ${t}틱`); }
   // 어려운 경우: 주제 크기 차이가 큼 / 주제 사이 선이 거의 없음 / 선이 적은 주제 / 둘 다
   const hard = (sizes, { cross = 2, sparse = -1 } = {}) => {
     let sd = 11; const r = () => ((sd = (sd * 1103515245 + 12345) % 2147483648) / 2147483648);

@@ -295,9 +295,10 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
   function animate() {
     if (raf || !data) return;
     const loop = () => {
-      const steps = data.nodes.length > 2500 ? 1 : 2;
+      // 한 프레임에 최대 4틱, 6ms 안에서 (1,000개 약 0.7ms/틱 → 4틱, 3,000개 약 2.6ms/틱 → 2~3틱). 틱 순서는 같아 최종 배치는 기기와 무관
+      const t0 = performance.now();
       let running = true;
-      for (let s = 0; s < steps && running; s++) running = data.layout.tick();
+      for (let s = 0; s < 4 && running && (s === 0 || performance.now() - t0 < 6); s++) running = data.layout.tick();
       raf = running || drag?.type === "node" ? requestAnimationFrame(loop) : 0;
       draw();
     };
