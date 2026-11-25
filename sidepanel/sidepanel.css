@@ -277,7 +277,7 @@ mark.hl-p { text-decoration-color: #0b7285; }
 #k-val { min-width: 62px; font-size: 13px; }
 
 /* 댓글 목록 (주제별). 줄 높이를 고정해 보이는 줄만 그린다 */
-.clist { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); margin-bottom: 14px; }
+.clist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); margin-bottom: 14px; }
 .clist[hidden] { display: none; }
 .clist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .clist-tools { display: flex; gap: 6px; flex-wrap: wrap; }
