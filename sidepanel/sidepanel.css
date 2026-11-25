@@ -208,8 +208,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .help ul { margin-top: 6px; display: grid; gap: 4px; padding-left: 14px; list-style: disc; }
 
 /* 탭 + 목록 */
-.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
-.tabs::-webkit-scrollbar { display: none; }
+/* 탭이 폭을 넘으면 줄을 바꾼다 (가로 스크롤로 숨기면 뒤쪽 탭이 있는 줄 모름) */
+.tabs { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--line); }
 .tabs button { position: relative; height: 36px; padding: 0 10px; white-space: nowrap; flex: none; border: 0; background: none; color: var(--muted); font: inherit; font-weight: 550; cursor: pointer; }
 .tabs button[aria-selected="true"] { color: var(--ink); }
 .tabs button[aria-selected="true"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px; }
