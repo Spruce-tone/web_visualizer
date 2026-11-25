@@ -331,8 +331,9 @@ export function createGraph(canvas, tooltip, { onPick, onTagsChange, onSelection
     const t = document.createElement("div"); t.textContent = nd.label;
     const s = document.createElement("div"); s.className = "sub"; s.textContent = nd.sub;
     tooltip.append(t, s);
-    tooltip.style.left = `${Math.max(4, Math.min(mx + 12, W - tooltip.offsetWidth - 4))}px`;
-    tooltip.style.top = `${Math.max(4, Math.min(my + 14, H - tooltip.offsetHeight - 4))}px`;
+    // 좁은 화면에서는 조작부가 지도 위 줄에 있어 캔버스가 아래로 밀려 있다 → 캔버스 위치만큼 더한다
+    tooltip.style.left = `${canvas.offsetLeft + Math.max(4, Math.min(mx + 12, W - tooltip.offsetWidth - 4))}px`;
+    tooltip.style.top = `${canvas.offsetTop + Math.max(4, Math.min(my + 14, H - tooltip.offsetHeight - 4))}px`;
   }
 
   // 주제를 통째로 고르면 보조로 속한 댓글도 강조되지만, '내 분류'에는 주 주제 댓글만 담는다

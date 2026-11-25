@@ -139,6 +139,11 @@ h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 .map canvas:active { cursor: grabbing; }
 .map-tools { position: absolute; top: 10px; right: 10px; left: 10px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; pointer-events: none; }
 .map-tools > * { pointer-events: auto; }
+/* 좁은 화면(사이드 패널): 조작부가 지도 위에 두 줄로 겹쳐 점을 가리므로, 지도 바로 위 한 줄로 뺀다 (숨기지 않음) */
+@media (max-width: 819.98px) {
+  .map { display: flex; flex-direction: column; }
+  .map-tools { position: static; order: -1; justify-content: flex-start; padding: 8px 8px 0; }
+}
 .map-tools .chip-btn, .map-tools .chip-toggle, .map-tools .chip-select { background: var(--map-chip); border-color: var(--map-chip-line); color: var(--map-ink); backdrop-filter: blur(6px); }
 .map-legend { position: absolute; left: 12px; bottom: 10px; right: 12px; display: flex; gap: 6px 12px; flex-wrap: wrap; font-size: 11px; color: var(--map-ink); pointer-events: none; }
 .map-legend span { display: inline-flex; align-items: center; gap: 5px; }
