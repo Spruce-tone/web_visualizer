@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Web Visualizer",
   "version": "0.12.1",
+  "minimum_chrome_version": "116",
   "description": "YouTube 영상 댓글을 기기 안에서 분석해 주제 지도로 보여 주고, 문구가 거의 같은 댓글 같은 신호를 근거와 함께 표시합니다. 저장·전송 없음.",
   "permissions": [
     "sidePanel",
