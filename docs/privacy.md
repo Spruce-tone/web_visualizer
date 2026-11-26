@@ -40,7 +40,7 @@ Web Visualizer(이하 "확장")는 YouTube 영상의 댓글을 사용자의 기�
 
 ### 6. 권한
 - `host_permissions: https://www.youtube.com/*`: YouTube 영상 페이지에서 댓글을 읽고 그 댓글 위치로 이동하기 위해
-- `scripting`: 영상 페이지에 댓글 읽기 스크립트를 다시 넣기 위해(확장 업데이트 뒤 등)
+- `scripting`: 영상 페이지에 댓글 읽기 스크립트를 다시 넣기 위해(확장 업데이트 뒤 등), 그리고 '페이지에서 이 댓글 보기'를 누르면 그 페이지에 작은 스크립트(page-bridge)를 넣어 댓글 영역만 다시 불러오기 위해
 - `sidePanel`: 옆 패널로 열기 위해
 - `offscreen`: 창을 닫아도 분석 계산(Web Worker)이 끝까지 이어지도록, 화면 없는 문서를 쓰기 위해
 
@@ -89,7 +89,7 @@ Author names are masked by default (e.g. "Author 1"); the user can turn this off
 
 ### 6. Permissions
 - `host_permissions: https://www.youtube.com/*`: to read comments on YouTube video pages and scroll to a selected comment
-- `scripting`: to re-inject the comment reader into the video page (e.g. after an extension update)
+- `scripting`: to re-inject the comment reader into the video page (e.g. after an extension update), and, when the user clicks "Show this comment on the page", to inject a small script (page-bridge) into that page that reloads only the comment section
 - `sidePanel`: to open in the browser side panel
 - `offscreen`: to keep the analysis (a Web Worker) running to completion after the popup closes, using a page-less document
 

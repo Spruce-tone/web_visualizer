@@ -91,7 +91,7 @@ To update: download the zip again, overwrite the same folder, then press ↻ on 
 
 ## Permissions
 - `www.youtube.com`: read the public comments of the video you are viewing and scroll to a chosen comment
-- `scripting`: re-inject the comment reader into the video tab
+- `scripting`: re-inject the comment reader into the video tab, and inject the page bridge (page-bridge) for "Show this comment on the page" so only the comment section reloads
 - `sidePanel`: open in the side panel
 - `offscreen`: keep the analysis running after the popup closes
 
