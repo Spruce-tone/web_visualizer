@@ -15,6 +15,8 @@ import { pileOns, SessionMemory } from "../lib/patterns.js";
 import { TONE_LABEL } from "../lib/tone.js";
 import { createGraph, TOPIC_COLORS, TAG_COLORS } from "./graph.js";
 import { getOpenMode, setOpenMode } from "../lib/open-mode.js";
+import { progressText } from "../lib/job-store.js";
+import { fromWire } from "../lib/wire.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -51,7 +53,7 @@ $("ver").textContent = "v" + chrome.runtime.getManifest().version;
 if (fixedTab) $("btn-wide").hidden = true;
 if (popupMode) {
   $("btn-to-panel").hidden = false;
-  $("empty").querySelector("p:last-child").textContent = "댓글을 점으로 찍은 지도가 그려집니다. 비슷한 이야기끼리 모이고, 문구를 베낀 듯한 댓글은 따로 표시됩니다. 이 창은 페이지를 누르면 닫혀요. 오래 볼 때는 '옆 패널로 열기'나 '크게 보기'를 쓰세요. 수집한 내용은 저장하지 않습니다.";
+  $("empty").querySelector("p:last-child").textContent = "댓글을 점으로 찍은 지도가 그려집니다. 비슷한 이야기끼리 모이고, 문구를 베낀 듯한 댓글은 따로 표시됩니다. 이 창은 페이지를 누르면 닫히지만 분석은 끝까지 이어지고, 다시 열면 결과가 그대로 있어요. 결과는 저장하지 않고, 영상 탭을 닫거나 다른 영상으로 가면 사라집니다.";
 }
 
 const graph = createGraph($("graph"), $("tooltip"), {
@@ -122,8 +124,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (fixedTab && sender.tab && sender.tab.id !== fixedTab) return;
   if (msg?.type === "WV_PROGRESS") {
     if ($("btn-cancel").hidden) return; // 이 창에서 시작한 수집이 아님
-    const what = msg.phase === "후보 확인" ? "무작위로 뽑을 후보 댓글 확인 중" : msg.phase === "답글 받는 중" ? "뽑힌 댓글의 답글 받는 중" : "댓글 모으는 중";
-    setStatus(`${what} ${num(msg.count)}개${msg.total ? ` (전체 약 ${num(msg.total)}개)` : ""}`, "busy");
+    setStatus(progressText(msg), "busy");
+  } else if (msg?.type === "WV_JOB_UPDATE") {
+    jobWaiters.get(msg.job)?.(msg); // offscreen 분석 문서의 진행·끝 알림
   } else if (msg?.type === "WV_FIND_PROGRESS") {
     if (finding) $("d-status").textContent = msg.text;
   } else if (msg?.type === "WV_STATE_REQUEST" && !fixedTab && S && S.tabId === msg.tabId) {
@@ -140,7 +143,7 @@ async function checkVideo() {
   return vid;
 }
 chrome.tabs.onUpdated.addListener((_id, info) => { if (info.url || info.status === "complete") checkVideo(); });
-chrome.tabs.onActivated.addListener(() => checkVideo());
+chrome.tabs.onActivated.addListener(() => { checkVideo(); if (!S && !fixedTab) attachToTab(); });
 
 // ---------- 분석 ----------
 function setBusy(busy) {
@@ -245,48 +248,141 @@ async function retopic() {
   rebuild();
 }
 
+const NO_REPLY = "페이지에서 응답이 없어요. 영상을 새로고침한 뒤 다시 시도하세요.";
 async function run(type, extra) {
   setBusy(true);
   try {
     const tab = await targetTab();
     setStatus(type === "WV_COLLECT_ALL" ? "댓글 모으기 시작" : "화면의 댓글 읽는 중", "busy");
-    const res = await send(type, extra);
-    if (!res?.ok) throw new Error(res?.error || "페이지에서 응답이 없어요. 영상을 새로고침한 뒤 다시 시도하세요.");
-    const { doc, comments } = res.data;
-    if (!comments.length) throw new Error("댓글을 찾지 못했어요. 댓글이 꺼진 영상인지 확인하세요.");
-    const notes = [];
-    if (res.fallback) notes.push(`전체 수집이 안 돼서 화면에 보이는 댓글만 분석했어요 (${res.fallback})`);
-    if (doc.meta.collection?.cancelled) notes.push("중지해서 모은 만큼만 분석했어요");
-    if (doc.meta.collection?.limited) notes.push(`YouTube가 요청을 계속 받지 않아서(요청 제한이나 서버 오류) 중간에 멈추고, 모은 만큼만 분석했어요.${doc.meta.collection.noReplies ? " 답글은 받지 못했어요." : ""} 잠시 뒤 다시 모으면 더 받을 수 있어요`);
-
-    const n = comments.length;
     const mode = String($("mode").value);
-    const A = await analyze({ doc, comments, useSemantic: mode !== "fast" && !!semantic, mode }, (m) => setStatus(m, "busy"));
-    notes.push(...A.notes);
-
-    S = {
-      tabId: tab.id, doc, comments, lexVecs: A.lexVecs, lexNbrs: A.lexNbrs, semNbrs: A.semNbrs, x: A.x, y: A.y, graphEdges: A.graphEdges,
-      idx: A.idx, short: A.short, semantic: A.semantic, modelName: A.modelName, where: A.where, para: A.para, co: A.co, tone: A.tone, presets: A.presets,
-      workerKey: A.workerKey,
-    };
-    topicCache = new Map([[FIRST_RES, A.firstTopics]]);
-    memory.add(doc, comments);
-    picked = -1; savedTags = null; V = null; mapMode = "comments";
-    showResult();
-    setRes(FIRST_RES);
-    renderPresets();
-    rebuild({ fresh: true });
-    await checkVideo();
-
-    const sec = (ms) => `${(ms / 1000).toFixed(1)}초`;
-    const parts = [`댓글 ${num(n)}개 분석 완료`, `문구 ${sec(A.times.lex)}`, A.semantic ? `의미 ${sec(A.times.sem)} (${A.where})` : null, `지도 ${sec(A.times.map)}`].filter(Boolean);
-    setStatus([parts.join(" / "), ...notes].join(" — "), notes.length ? "error" : "");
+    const useSemantic = mode !== "fast" && !!semantic;
+    // 1) offscreen 분석 문서가 있으면 거기서: 이 창(팝업)이 닫혀도 수집·분석이 끝까지 가고, 결과는 그 탭이 열려 있는 동안 남는다
+    if (await offscreenReady()) {
+      const job = `j${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+      const waiting = waitJob(tab.id, job);
+      await chrome.runtime.sendMessage({ type: "WV_JOB_START", tabId: tab.id, videoId: videoIdOf(tab), job, useSemantic, mode });
+      const res = await send(type, { ...extra, deliver: job });
+      if (!res?.ok) { stopWaiting(job); throw new Error(res?.error || NO_REPLY); }
+      if (res.started) {
+        const out = await waiting;
+        if (out.phase !== "done") throw new Error(out.error || "분석하지 못했어요");
+        await showAnalysis(tab, decodeResult(out.result), { job });
+        return;
+      }
+      stopWaiting(job); // deliver를 모르는 content script가 바로 결과를 줌 → 아래에서 직접 분석
+      return await analyzeHere(tab, res, useSemantic, mode);
+    }
+    // 2) offscreen을 못 쓰면 예전처럼 이 창에서 (Worker → 안 되면 이 창의 스레드)
+    await analyzeHere(tab, await send(type, extra), useSemantic, mode);
   } catch (e) {
     setStatus(e.message, "error");
   } finally {
     setBusy(false);
   }
 }
+async function analyzeHere(tab, res, useSemantic, mode) {
+  if (!res?.ok) throw new Error(res?.error || NO_REPLY);
+  const { doc, comments } = res.data;
+  if (!comments.length) throw new Error("댓글을 찾지 못했어요. 댓글이 꺼진 영상인지 확인하세요.");
+  const A = await analyze({ doc, comments, useSemantic, mode }, (m) => setStatus(m, "busy"));
+  await showAnalysis(tab, { doc, comments, A, fallback: res.fallback });
+}
+
+/** 분석 결과를 화면에 올린다. job이 있으면 offscreen 문서에 있는 결과 (화면 상태를 그쪽에 넘겨 둔다) */
+async function showAnalysis(tab, { doc, comments, A, fallback }, { job = null, reopened = false } = {}) {
+  const notes = [];
+  if (fallback) notes.push(`전체 수집이 안 돼서 화면에 보이는 댓글만 분석했어요 (${fallback})`);
+  if (doc.meta.collection?.cancelled) notes.push("중지해서 모은 만큼만 분석했어요");
+  if (doc.meta.collection?.limited) notes.push(`YouTube가 요청을 계속 받지 않아서(요청 제한이나 서버 오류) 중간에 멈추고, 모은 만큼만 분석했어요.${doc.meta.collection.noReplies ? " 답글은 받지 못했어요." : ""} 잠시 뒤 다시 모으면 더 받을 수 있어요`);
+  notes.push(...A.notes);
+  const n = comments.length;
+
+  S = {
+    tabId: tab.id, doc, comments, lexVecs: A.lexVecs, lexNbrs: A.lexNbrs, semNbrs: A.semNbrs, x: A.x, y: A.y, graphEdges: A.graphEdges,
+    idx: A.idx, short: A.short, semantic: A.semantic, modelName: A.modelName, where: A.where, para: A.para, co: A.co, tone: A.tone, presets: A.presets,
+    workerKey: A.workerKey, job,
+  };
+  topicCache = new Map([[FIRST_RES, A.firstTopics]]);
+  memory.add(doc, comments);
+  picked = -1; savedTags = null; V = null; mapMode = "comments";
+  showResult();
+  setRes(FIRST_RES);
+  renderPresets();
+  rebuild({ fresh: true });
+  await checkVideo();
+
+  const sec = (ms) => `${(ms / 1000).toFixed(1)}초`;
+  const parts = [`댓글 ${num(n)}개 분석 완료`, `문구 ${sec(A.times.lex)}`, A.semantic ? `의미 ${sec(A.times.sem)} (${A.where})` : null, `지도 ${sec(A.times.map)}`].filter(Boolean);
+  if (reopened) parts.unshift("창이 닫힌 사이 끝난 분석을 열었어요");
+  setStatus([parts.join(" / "), ...notes].join(" — "), notes.length ? "error" : "");
+}
+
+// ---------- offscreen 분석 문서와 주고받기 (offscreen/offscreen.js, lib/offscreen-core.js) ----------
+// 결과는 그 문서의 메모리에만 있고, 탭이 닫히거나 다른 영상으로 가면 지워진다. 이 창은 열릴 때 받아 그리고, 화면 상태(분류·옮긴 자리 등)를 넘겨 둔다.
+const jobWaiters = new Map(); // job → (WV_JOB_UPDATE 메시지) => void
+async function offscreenReady() {
+  try { return (await chrome.runtime.sendMessage({ type: "WV_OFFSCREEN_ENSURE" }))?.ok === true; } catch { return false; }
+}
+async function jobGet(tabId) {
+  try { return (await chrome.runtime.sendMessage({ type: "WV_JOB_GET", tabId })) || null; } catch { return null; } // 문서가 없으면 결과도 없다
+}
+/** 작업이 끝날 때까지(done | error). 진행 문구는 상태 줄에. 알림을 놓쳐도 2초마다 직접 물어본다 */
+function waitJob(tabId, job) {
+  return new Promise((resolve) => {
+    let timer = 0, over = false;
+    const stop = () => { over = true; clearInterval(timer); jobWaiters.delete(job); };
+    const finish = async () => {
+      if (over) return;
+      stop();
+      const e = await jobGet(tabId);
+      resolve(e?.job === job ? e : { phase: "error", error: "분석 결과가 사라졌어요(탭이 닫혔거나 다른 영상으로 이동). 다시 분석해 주세요." });
+    };
+    const check = (m) => {
+      if (m.phase === "done" || m.phase === "error") return finish();
+      if (m.status && m.phase === "analyzing") setStatus(m.status, "busy");
+    };
+    check.stop = stop;
+    jobWaiters.set(job, check);
+    timer = setInterval(async () => { const e = await jobGet(tabId); if (over) return; if (!e?.phase || e.job !== job) finish(); else check(e); }, 2000);
+  });
+}
+const stopWaiting = (job) => jobWaiters.get(job)?.stop?.();
+function decodeResult(wire) {
+  const r = fromWire(wire);
+  return { ...r, A: { ...r.A, lexVecs: viewVectors(r.A.lexVecs) } };
+}
+/** offscreen에 있는 결과를 연다: 넘겨 둔 화면 상태가 있으면 그대로, 없으면 분석 결과에서 새로 */
+function openJobResult(tab, e, msg) {
+  if (e.ui?.S) { applySnapshot(e.ui, msg); S.job = e.job; }
+  else showAnalysis(tab, decodeResult(e.result), { job: e.job, reopened: true });
+}
+/** 열릴 때(사이드 패널·팝업): 지금 탭에 offscreen 결과나 진행 중인 분석이 있으면 이어받는다 */
+async function attachToTab() {
+  const tab = await currentTab().catch(() => null);
+  const vid = videoIdOf(tab);
+  if (!vid || S) return;
+  const e = await jobGet(tab.id);
+  if (!e?.phase || e.videoId !== vid || S) return;
+  if (e.phase === "done") return openJobResult(tab, e, "이 영상의 분석 결과를 그대로 다시 열었어요.");
+  if (e.phase === "error") return setStatus(e.error, "error");
+  setBusy(true);
+  setStatus(e.status || "분석 중", "busy");
+  try {
+    const out = await waitJob(tab.id, e.job);
+    if (out.phase === "done" && !S) showAnalysis(tab, decodeResult(out.result), { job: out.job });
+    else if (out.phase !== "done") setStatus(out.error, "error");
+  } finally { setBusy(false); }
+}
+// 화면 상태를 offscreen에 넘겨 둔다 (분류·옮긴 자리·기준값). 팝업은 언제든 닫히므로 바뀔 때마다 0.5초 모아서
+let uiTimer = 0;
+function pushUi() {
+  clearTimeout(uiTimer);
+  if (!S?.job) return;
+  chrome.runtime.sendMessage({ type: "WV_JOB_UI", tabId: S.tabId, job: S.job, ui: snapshot() }).catch(() => {});
+}
+const scheduleUi = () => { if (!S?.job) return; clearTimeout(uiTimer); uiTimer = setTimeout(pushUi, 500); };
+for (const ev of ["pointerup", "change", "keyup", "click"]) document.addEventListener(ev, scheduleUi, true);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && uiTimer) pushUi(); });
 
 function showResult() {
   $("empty").hidden = true;
@@ -1008,21 +1104,24 @@ function snapshot() {
   };
 }
 async function restoreFromPanel() {
-  try {
-    const snap = await chrome.runtime.sendMessage({ type: "WV_STATE_REQUEST", tabId: fixedTab });
-    if (!snap?.S) return;
-    S = snap.S;
-    S.lexVecs = snap.lexVecs ? unpackVectors(snap.lexVecs) : null;
-    tagDefs = snap.tagDefs;
-    picked = -1; V = null; shown = null; mapMode = "comments"; topicCache = new Map();
-    memory.add(S.doc, S.comments);
-    showResult();
-    setRes(Number(snap.res));
-    renderPresets();
-    setSlider("th-lex", snap.thLex);
-    rebuild({ fresh: true, restore: { tags: snap.tags, pos: snap.pos } });
-    setStatus("패널의 분석 결과를 그대로 가져왔어요.");
-  } catch { /* 패널이 닫혀 있으면 여기서 새로 분석하면 된다 */ }
+  const snap = await chrome.runtime.sendMessage({ type: "WV_STATE_REQUEST", tabId: fixedTab }).catch(() => null);
+  if (snap?.S) return applySnapshot(snap, "패널의 분석 결과를 그대로 가져왔어요.");
+  // 패널이 닫혀 있으면(팝업은 크게 보기를 열면 닫힌다) offscreen 문서에 남은 결과를 받는다. 없으면 여기서 새로 분석하면 된다
+  await ready;
+  await attachToTab();
+}
+function applySnapshot(snap, msg) {
+  S = snap.S;
+  S.lexVecs = snap.lexVecs ? unpackVectors(snap.lexVecs) : null;
+  tagDefs = snap.tagDefs;
+  picked = -1; V = null; shown = null; mapMode = "comments"; topicCache = new Map();
+  memory.add(S.doc, S.comments);
+  showResult();
+  setRes(Number(snap.res));
+  renderPresets();
+  setSlider("th-lex", snap.thLex);
+  rebuild({ fresh: true, restore: { tags: snap.tags, pos: snap.pos } });
+  setStatus(msg);
 }
 
 // ---------- 점수 기준 (기본 규칙 / 공개 데이터 보정) ----------
@@ -1064,6 +1163,7 @@ async function openSidePanel() {
     setStatus("이 브라우저에선 옆 패널을 바로 열 수 없어요. '아이콘을 누르면'을 '옆 패널로 열기'로 바꾼 뒤 아이콘을 다시 눌러 주세요.", "error");
     return false;
   }
+  pushUi(); // 옆 패널이 열리며 offscreen에서 이 화면 상태를 받아 간다
   window.close();
   return true;
 }
@@ -1171,7 +1271,8 @@ async function initModels() {
 
 renderTags();
 const ready = Promise.all([initModels(), initWeights(), initOpenMode()]);
-if (fixedTab) restoreFromPanel();
+// 크게 보기: 패널(없으면 offscreen)의 결과를 받는다 / 사이드 패널·팝업: 이 탭에 남은 결과나 진행 중인 분석을 이어받는다
+const attached = fixedTab ? restoreFromPanel() : ready.then(attachToTab);
 
 // 자동 점검용 연결 고리 (tests/panel-smoke.mjs). 확장 프로그램에서는 정의돼 있지 않아 아무 일도 하지 않는다.
-globalThis.__WV_TEST__?.({ ready, popupMode, openSidePanel, graph, rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });
+globalThis.__WV_TEST__?.({ ready, attached, pushUi, popupMode, openSidePanel, graph, rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });

@@ -1299,4 +1299,96 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(f.popup, ""); assert.equal(f.behavior, true);
 }
 
+// 탭별 분석 결과 (offscreen 문서 메모리, lib/job-store.js): 작업 번호가 맞을 때만 바뀌고, 상한을 넘으면 오래 안 본 끝난 결과부터 지운다
+{
+  const { createJobStore, progressText } = await import("../lib/job-store.js");
+  let t = 0;
+  const st = createJobStore({ max: 2, now: () => ++t });
+  st.start(1, { videoId: "A", job: "j1" });
+  assert.equal(st.collected(1, "옛 작업"), null, "다른 작업 번호는 무시");
+  assert.equal(st.collected(1, "j1").phase, "analyzing");
+  st.progress(1, "의미 분석 중", "j1");
+  assert.equal(st.get(1).status, "의미 분석 중");
+  st.done(1, "j1", { r: 1 });
+  assert.equal(st.setUi(1, "j1", { tags: [1] }), true);
+  assert.equal(st.setUi(1, "j2", { tags: [2] }), false, "다른 작업의 화면 상태는 받지 않음");
+  assert.deepEqual(st.get(1).ui, { tags: [1] });
+  st.start(2, { videoId: "B", job: "j2" }); // 계산 중
+  st.start(3, { videoId: "C", job: "j3" }); // 계산 중 → 상한 2를 넘음: 끝난 1만 지울 수 있다
+  assert.deepEqual(st.tabs().sort(), [2, 3], "상한을 넘으면 끝난 결과를 지우고, 계산 중인 작업은 지우지 않는다");
+  st.start(4, { videoId: "D", job: "j4" });
+  assert.equal(st.size, 3, "모두 계산 중이면 상한을 잠시 넘는다");
+  st.done(2, "j2", {}); st.done(3, "j3", {}); // 끝나는 순간 상한을 맞춘다
+  assert.equal(st.size, 2);
+  assert.equal(st.get(2), null, "가장 오래 안 본 끝난 결과(2)부터");
+  assert.equal(st.urlChanged(3, "C"), false, "같은 영상 안의 이동(시간 등)은 그대로");
+  assert.equal(st.urlChanged(3, "Z"), true, "다른 영상으로 가면 지움");
+  assert.equal(st.urlChanged(4, null), true, "영상이 아닌 페이지로 가도 지움");
+  assert.equal(st.size, 0);
+  assert.equal(progressText({ phase: "답글 받는 중", count: 1200, total: 5000 }), "뽑힌 댓글의 답글 받는 중 1,200개 (전체 약 5,000개)");
+}
+
+// 확장 메시지(JSON)로 형식 배열 넘기기 (lib/wire.js)
+{
+  const { toWire, fromWire } = await import("../lib/wire.js");
+  const src = { ids: Int32Array.from([3, -1, 7]), v: { flat: Float32Array.from([0.5, -2.25]), dim: 2, n: 1 }, list: [Uint8Array.from([1, 2]), "x", null, 3], s: "문자" };
+  const back = fromWire(JSON.parse(JSON.stringify(toWire(src))));
+  assert.ok(back.ids instanceof Int32Array); assert.deepEqual(Array.from(back.ids), [3, -1, 7]);
+  assert.ok(back.v.flat instanceof Float32Array); assert.deepEqual(Array.from(back.v.flat), [0.5, -2.25]);
+  assert.deepEqual(Array.from(back.list[0]), [1, 2]); assert.equal(back.list[1], "x"); assert.equal(back.list[2], null); assert.equal(back.s, "문자");
+  // 일부만 보는 배열(subarray)도 그 부분만
+  const big = Float32Array.from([1, 2, 3, 4]);
+  assert.deepEqual(Array.from(fromWire(JSON.parse(JSON.stringify(toWire(big.subarray(1, 3)))))), [2, 3]);
+  const mm = fromWire(JSON.parse(JSON.stringify(toWire({ m: new Map([[3, [1, 2]], [5, Int32Array.from([9])]]), s: new Set(["a"]) }))));
+  assert.ok(mm.m instanceof Map && mm.m.get(3)[1] === 2 && mm.m.get(5)[0] === 9, "Map(주제 겹침 등)도 되살아난다");
+  assert.ok(mm.s instanceof Set && mm.s.has("a"));
+}
+
+// offscreen 문서 처리 (lib/offscreen-core.js): 수집 응답을 받으면 분석하고 탭별로 결과를 둔다. 다른 탭과 섞이지 않는다
+{
+  const { createOffscreenCore } = await import("../lib/offscreen-core.js");
+  const { createHandler } = await import("../lib/worker-core.js");
+  const { fromWire } = await import("../lib/wire.js");
+  const sent = [];
+  let emptied = 0;
+  const core = createOffscreenCore({ broadcast: (m) => sent.push(m), handler: createHandler({ loadSemantic: async () => { throw new Error("없음"); } }), onEmpty: () => emptied++ });
+  const docA = { id: "youtube:A", title: "A", text: "", meta: { videoId: "A" } };
+  const cs = Array.from({ length: 30 }, (_, i) => ({ id: "c" + i, text: `${["편집이 깔끔해요", "음악 제목 알려주세요", "설명이 쉬워요"][i % 3]} ${i}`, author: "u" + i, likes: i }));
+  assert.deepEqual(core.onMessage({ type: "WV_JOB_START", tabId: 5, videoId: "A", job: "j1", useSemantic: false, mode: "fast" }), { ok: true });
+  core.onMessage({ type: "WV_PROGRESS", count: 10, total: 30, phase: "" }, { tab: { id: 5 } });
+  assert.equal(core.onMessage({ type: "WV_JOB_GET", tabId: 5 }).status, "댓글 모으는 중 10개 (전체 약 30개)");
+  core.onMessage({ type: "WV_PROGRESS", count: 99, phase: "" }, { tab: { id: 6 } }); // 다른 탭의 진행은 무시
+  core.onMessage({ type: "WV_COLLECTED", job: "다른 작업", reply: { ok: true, data: { doc: docA, comments: cs } } }, { tab: { id: 5 } });
+  assert.equal(core.onMessage({ type: "WV_JOB_GET", tabId: 5 }).phase, "collecting", "작업 번호가 다르면 받지 않는다");
+  core.onMessage({ type: "WV_COLLECTED", job: "j1", reply: { ok: true, data: { doc: docA, comments: cs } } }, { tab: { id: 5 } });
+  await core.idle();
+  const g = core.onMessage({ type: "WV_JOB_GET", tabId: 5 });
+  assert.equal(g.phase, "done");
+  const r = fromWire(JSON.parse(JSON.stringify(g.result)));
+  assert.equal(r.comments.length, 30); assert.equal(r.A.lexVecs.n, 30); assert.ok(r.A.firstTopics.ids instanceof Int32Array, "주제 번호 배열도 JSON을 지나 되살아난다");
+  assert.ok(sent.some((m) => m.type === "WV_JOB_UPDATE" && m.tabId === 5 && m.phase === "done"), "끝나면 알린다");
+  assert.equal(core.onMessage({ type: "WV_JOB_GET", tabId: 6 }).phase, null, "다른 탭에는 결과가 없다");
+  assert.deepEqual(core.onMessage({ type: "WV_JOB_UI", tabId: 5, job: "j1", ui: { tags: [0] } }), { ok: true });
+  assert.deepEqual(core.onMessage({ type: "WV_JOB_GET", tabId: 5 }).ui, { tags: [0] });
+  // 실패 응답
+  core.onMessage({ type: "WV_JOB_START", tabId: 6, videoId: "B", job: "j2" });
+  core.onMessage({ type: "WV_COLLECTED", job: "j2", reply: { ok: true, data: { doc: docA, comments: [] } } }, { tab: { id: 6 } });
+  assert.match(core.onMessage({ type: "WV_JOB_GET", tabId: 6 }).error, /댓글을 찾지 못했어요/);
+  // 탭 닫힘·다른 영상 → 지움. 모두 지워지면 문서를 닫으라고 알린다
+  core.onMessage({ type: "WV_JOB_URL", tabId: 5, videoId: "A" });
+  assert.equal(core.onMessage({ type: "WV_JOB_GET", tabId: 5 }).phase, "done", "같은 영상이면 그대로");
+  core.onMessage({ type: "WV_JOB_DROP", tabId: 5 });
+  assert.equal(core.onMessage({ type: "WV_JOB_GET", tabId: 5 }).phase, null, "탭을 닫으면 결과가 사라진다");
+  assert.equal(emptied, 0);
+  core.onMessage({ type: "WV_JOB_URL", tabId: 6, videoId: null });
+  assert.equal(emptied, 1, "맡은 결과가 없으면 알린다");
+  // 분석 중에 탭이 닫히면 끝나도 결과를 두지 않는다
+  core.onMessage({ type: "WV_JOB_START", tabId: 7, videoId: "A", job: "j3", useSemantic: false });
+  core.onMessage({ type: "WV_COLLECTED", job: "j3", reply: { ok: true, data: { doc: docA, comments: cs } } }, { tab: { id: 7 } });
+  core.onMessage({ type: "WV_JOB_DROP", tabId: 7 });
+  await core.idle();
+  assert.equal(core.store.size, 0, "닫힌 탭의 분석 결과는 남지 않는다");
+  assert.equal(core.onMessage({ type: "모름" }), undefined, "모르는 메시지에는 답하지 않는다(다른 곳이 답하게)");
+}
+
 console.log("all tests passed");

@@ -387,19 +387,25 @@
     } else if (msg.type === "WV_FIND_CANCEL") {
       findCancelled = true;
       sendResponse({ ok: true });
-    } else if (msg.type === "WV_EXTRACT") {
-      try { sendResponse({ ok: true, data: extract() }); }
-      catch (e) { sendResponse({ ok: false, error: String(e) }); }
-    } else if (msg.type === "WV_COLLECT_ALL") {
+    } else if (msg.type === "WV_EXTRACT" || msg.type === "WV_COLLECT_ALL") {
+      // deliver(작업 번호)가 있으면 바로 '시작함'만 답하고, 다 모은 응답은 확장 쪽(offscreen 분석 문서)으로 따로 보낸다.
+      // 그래야 요청한 팝업이 중간에 닫혀도 결과가 분석으로 이어진다.
+      const reply = msg.deliver ? (r) => chrome.runtime.sendMessage({ type: "WV_COLLECTED", job: msg.deliver, reply: r }).catch(() => {}) : sendResponse;
+      if (msg.deliver) sendResponse({ ok: true, started: true });
+      if (msg.type === "WV_EXTRACT") {
+        try { reply({ ok: true, data: extract() }); }
+        catch (e) { reply({ ok: false, error: String(e) }); }
+        return;
+      }
       collectAll(msg.options).then(
-        (data) => sendResponse({ ok: true, data }),
+        (data) => reply({ ok: true, data }),
         (e) => {
           // 내부 API가 실패하면 화면에 보이는 댓글로 대체
-          try { sendResponse({ ok: true, data: extract(), fallback: String(e.message || e) }); }
-          catch { sendResponse({ ok: false, error: String(e.message || e) }); }
+          try { reply({ ok: true, data: extract(), fallback: String(e.message || e) }); }
+          catch { reply({ ok: false, error: String(e.message || e) }); }
         }
       );
-      return true; // 비동기 응답
+      return !msg.deliver; // 비동기 응답 (deliver면 이미 답함)
     } else if (msg.type === "WV_CANCEL") {
       cancelled = true;
       sendResponse({ ok: true });

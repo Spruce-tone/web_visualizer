@@ -375,4 +375,78 @@ assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안
   assert.equal(closed, 1, "열지 못하면 팝업을 닫지 않는다");
 }
 
+// 9) offscreen 분석 문서: 팝업이 닫혀도 분석이 끝까지 가고, 다시 열면(새 패널 인스턴스) 그 탭의 결과·화면 상태가 그대로 돌아온다
+//    chrome.runtime 메시지를 실제 처리 부분(lib/offscreen-core.js + worker-core)으로 잇고, content script는 수집 응답을 늦게 보낸다.
+{
+  const { createOffscreenCore } = await import("../lib/offscreen-core.js");
+  const listeners = [];
+  const broadcast = (m) => { for (const l of [...listeners]) l(structuredClone(m), {}, () => {}); };
+  const core = createOffscreenCore({ broadcast, handler: createHandler({ loadSemantic: async () => { throw new Error("Node에는 의미 모델이 없음"); } }) });
+  const json = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v))); // 확장 메시지는 JSON으로 오간다
+  chrome.runtime = {
+    ...chrome.runtime,
+    onMessage: { addListener: (f) => listeners.push(f) },
+    sendMessage: async (m) => {
+      if (m.type === "WV_OFFSCREEN_ENSURE") return { ok: true };
+      broadcast(m);
+      return json(core.onMessage(json(m), {}));
+    },
+  };
+  let tabs = [{ id: 1, url: tabUrl, index: 0, windowId: 1 }];
+  chrome.tabs.query = async () => [tabs[0]];
+  chrome.tabs.get = async (id) => tabs.find((t) => t.id === id);
+  let delay = 0, collects = 0;
+  chrome.tabs.sendMessage = async (id, msg) => {
+    if (msg.type !== "WV_COLLECT_ALL") return { ok: true };
+    collects++;
+    assert.ok(msg.deliver, "offscreen이 있으면 수집 응답을 따로 보내 달라고 한다");
+    const reply = { ok: true, data: structuredClone(fixture) };
+    setTimeout(() => { const m = { type: "WV_COLLECTED", job: msg.deliver, reply }; broadcast(m); core.onMessage(json(m), { tab: { id } }); }, delay);
+    return { ok: true, started: true };
+  };
+  const openPanel = async (tag) => { api = null; await import(`../sidepanel/sidepanel.js?${tag}`); await api.ready; await new Promise((r) => setTimeout(r, 0)); return api; };
+
+  // a) 끝까지: 결과가 그려지고 offscreen에도 남는다
+  let p = await openPanel("off-a");
+  await byId("btn-all").onclick();
+  assert.ok(String(byId("status").textContent).includes("분석 완료"), `offscreen 분석: ${byId("status").textContent}`);
+  assert.equal(p.state().S.comments.length, fixture.comments.length);
+  assert.ok(p.state().S.job, "offscreen 작업 번호를 기억한다");
+  assert.equal(core.store.get(1).phase, "done");
+  // 화면 상태(내 분류)를 넘겨 둔다
+  p.graph.select([1, 2]); p.graph.tagSelection(0);
+  await p.pushUi();
+  assert.equal(core.store.get(1).ui.tags[1], 0, "고른 분류가 offscreen에 넘어간다");
+
+  // b) 다시 열기(팝업을 닫았다 엶): 수집·분석 없이 그대로
+  collects = 0;
+  p = await openPanel("off-b");
+  await p.attached;
+  assert.equal(collects, 0, "다시 열 때 다시 모으지 않는다");
+  assert.equal(p.state().S?.comments.length, fixture.comments.length, "다시 열면 결과가 돌아온다");
+  assert.equal(p.graph.tagsArray()[1], 0, "내 분류도 그대로");
+  assert.match(String(byId("status").textContent), /그대로 다시 열었어요/);
+
+  // c) 계산 도중 닫힘: 앞 창이 기다리는 동안 새 창이 열리면 진행 중인 작업을 이어받아 끝난 결과를 그린다
+  delay = 30;
+  const first = byId("btn-all").onclick(); // 이 창은 곧 '닫힌다'(더는 보지 않음)
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(core.store.get(1).phase, "collecting");
+  p = await openPanel("off-c");
+  await p.attached;
+  assert.equal(p.state().S?.comments.length, fixture.comments.length, "닫힌 사이 끝난 분석을 새 창이 받는다");
+  await first;
+
+  // d) 다른 탭: 결과가 섞이지 않는다 / 탭을 닫으면 사라진다
+  tabs = [{ id: 2, url: tabUrl, index: 1, windowId: 1 }, ...tabs];
+  p = await openPanel("off-d");
+  await p.attached;
+  assert.equal(p.state().S, null, "다른 탭에서 열면 그 탭의 결과만 (없음)");
+  core.onMessage({ type: "WV_JOB_DROP", tabId: 1 });
+  tabs = tabs.slice(1);
+  p = await openPanel("off-e");
+  await p.attached;
+  assert.equal(p.state().S, null, "탭을 닫으면 결과가 사라진다");
+}
+
 console.log("panel smoke passed");
