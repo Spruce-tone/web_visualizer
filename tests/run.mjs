@@ -1391,4 +1391,48 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(core.onMessage({ type: "모름" }), undefined, "모르는 메시지에는 답하지 않는다(다른 곳이 답하게)");
 }
 
+// 서비스 워커(background.js): 탭이 닫히거나 YouTube 밖으로 나가면 offscreen에 지우라고 알린다. offscreen 문서 만들기
+{
+  const L = {}, sent = [], created = [];
+  let contexts = [];
+  globalThis.chrome = {
+    sidePanel: { getPanelBehavior: async () => ({ openPanelOnActionClick: true }), setPanelBehavior: async () => {} },
+    action: { setPopup: async () => {} },
+    runtime: {
+      onInstalled: { addListener() {} }, onMessage: { addListener: (f) => (L.msg = f) }, getURL: (p) => p,
+      getContexts: async () => contexts,
+      sendMessage: async (m) => { sent.push(m); if (!contexts.length) throw new Error("Could not establish connection. Receiving end does not exist."); },
+    },
+    tabs: { onRemoved: { addListener: (f) => (L.removed = f) }, onUpdated: { addListener: (f) => (L.updated = f) }, create() {}, group: async () => {} },
+    offscreen: {
+      createDocument: async (o) => { if (contexts.length) throw new Error("Only a single offscreen document may be created."); created.push(o); contexts = [{}]; },
+      closeDocument: async () => { contexts = []; },
+    },
+  };
+  await import("../background.js");
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const last = () => sent[sent.length - 1];
+  L.updated(5, { status: "loading" }, { id: 5 }); await tick(); // tabs 권한이 없어 다른 사이트의 주소는 안 보인다
+  assert.deepEqual(last(), { type: "WV_JOB_URL", tabId: 5, videoId: null }, "YouTube 밖으로 나가면 영상 아님으로 알린다(문서가 없어도 오류 없이)");
+  L.updated(5, { url: "https://www.youtube.com/watch?v=AB" }, { id: 5, url: "https://www.youtube.com/watch?v=AB" }); await tick();
+  assert.deepEqual(last(), { type: "WV_JOB_URL", tabId: 5, videoId: "AB" });
+  L.updated(5, { status: "loading" }, { id: 5, url: "https://www.youtube.com/watch?v=AB&t=3" }); await tick();
+  assert.equal(last().videoId, "AB", "같은 영상을 다시 불러오면 그대로(지우지 않음)");
+  const n = sent.length;
+  L.updated(5, { status: "complete" }, { id: 5 }); await tick();
+  assert.equal(sent.length, n, "다 불러온 알림에는 보내지 않는다");
+  L.removed(5); await tick();
+  assert.deepEqual(last(), { type: "WV_JOB_DROP", tabId: 5 });
+  // 문서 만들기: 없으면 만들고, 있으면 그대로. getContexts가 없는 브라우저(Chrome 116 미만)도 된다
+  const ask = (m) => new Promise((r) => { if (L.msg(m, {}, r) !== true) r(undefined); });
+  assert.deepEqual(await ask({ type: "WV_OFFSCREEN_ENSURE" }), { ok: true });
+  assert.deepEqual(created[0].reasons, ["WORKERS"]);
+  assert.deepEqual(await ask({ type: "WV_OFFSCREEN_ENSURE" }), { ok: true }); assert.equal(created.length, 1, "있으면 또 만들지 않는다");
+  delete chrome.runtime.getContexts;
+  assert.deepEqual(await ask({ type: "WV_OFFSCREEN_ENSURE" }), { ok: true }, "물을 수 없어도 이미 있으면 됨");
+  L.removed(9); await tick();
+  assert.deepEqual(last(), { type: "WV_JOB_DROP", tabId: 9 }, "물을 수 없어도 정리 알림은 간다");
+  delete globalThis.chrome;
+}
+
 console.log("all tests passed");

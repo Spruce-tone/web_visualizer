@@ -8,9 +8,10 @@ installOpenMode();
 // 서비스 워커는 문서를 만들고 닫고, 탭이 닫히거나 다른 영상으로 가면 그 탭의 결과를 지우라고 알린다(offscreen 문서는 tabs API를 못 씀).
 const OFFSCREEN = "offscreen/offscreen.html";
 let creating = null;
+// getContexts는 Chrome 116부터. 없으면 모르는 것으로 보고 만들어 본다(이미 있으면 'single offscreen' 오류 → 있는 것)
 async function hasOffscreen() {
-  if (chrome.runtime.getContexts) return (await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] })).length > 0;
-  return false;
+  if (!chrome.runtime.getContexts) return false;
+  return (await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] })).length > 0;
 }
 async function ensureOffscreen() {
   if (await hasOffscreen()) return;
@@ -20,7 +21,8 @@ async function ensureOffscreen() {
   }).catch((e) => { if (!/single offscreen/i.test(String(e?.message))) throw e; }).finally(() => { creating = null; });
   await creating;
 }
-const tellOffscreen = async (m) => { if (await hasOffscreen()) chrome.runtime.sendMessage(m).catch(() => {}); };
+// 문서가 있는지 따지지 않고 보낸다: 없으면 받을 곳이 없다는 오류만 나고(삼킴), 있는지 물을 수 없는 브라우저에서도 정리 알림이 간다
+const tellOffscreen = (m) => chrome.runtime.sendMessage(m).catch(() => {});
 const videoIdOf = (url) => { try { return url?.includes("youtube.com/watch") ? new URL(url).searchParams.get("v") : null; } catch { return null; } };
 chrome.tabs.onRemoved.addListener((tabId) => tellOffscreen({ type: "WV_JOB_DROP", tabId }));
 // tabs 권한이 없어 YouTube 밖으로 나간 탭은 주소가 안 보인다(info.url도 tab.url도 없음) → 영상 아님(null)으로 알려 지우게 한다
