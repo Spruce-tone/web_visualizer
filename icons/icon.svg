@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Web Visualizer 아이콘 (128px 기준: 가운데 96px에 그림, 둘레 16px은 비움 — 크롬 웹 스토어 안내) -->
+  <rect x="16" y="16" width="96" height="96" rx="22" fill="#eef2ff" stroke="#c9d4ff" stroke-width="2"/>
+  <path d="M43 47L64 85L85 44" fill="none" stroke="#2b55e6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>
+  <path d="M43 47L85 44" fill="none" stroke="#2b55e6" stroke-width="3" stroke-linecap="round" opacity=".3"/>
+  <circle cx="43" cy="47" r="10" fill="#2b55e6"/>
+  <circle cx="85" cy="44" r="8" fill="#e8590c"/>
+  <circle cx="64" cy="85" r="13" fill="#2b55e6"/>
+</svg>

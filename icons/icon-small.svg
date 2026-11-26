@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 작은 아이콘(16·32·48px)용: 여백 없이 꽉 채우고 선을 굵게 -->
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="#eef2ff" stroke="#c9d4ff" stroke-width="1"/>
+  <path d="M9.5 10.5L16 22L22.5 9.5" fill="none" stroke="#2b55e6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".6"/>
+  <circle cx="9.5" cy="10.5" r="3.4" fill="#2b55e6"/>
+  <circle cx="22.5" cy="9.5" r="2.8" fill="#e8590c"/>
+  <circle cx="16" cy="22" r="4.4" fill="#2b55e6"/>
+</svg>
