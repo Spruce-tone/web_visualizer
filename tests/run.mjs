@@ -1435,4 +1435,19 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   delete globalThis.chrome;
 }
 
+// offscreen 분석(keep:false)은 Worker에 세밀도용 입력(원문·간선)을 남기지 않는다 → 탭이 닫혀도 남는 메모리가 없다
+{
+  const { createHandler } = await import("../lib/worker-core.js");
+  const h = createHandler({ loadSemantic: async () => { throw new Error("없음"); } });
+  const out = [];
+  const post = (m) => out.push(m);
+  const cs = Array.from({ length: 20 }, (_, i) => ({ id: "k" + i, text: `편집 이야기 ${i % 4} 번째 ${i}`, author: "a" + i }));
+  await h({ type: "analyze", run: 1, doc: { title: "t", text: "" }, comments: cs, useSemantic: false, keep: false }, post);
+  await h({ type: "topics", run: 2, key: 1, v: 50 }, post);
+  assert.equal(out.at(-1).code, "no-input", "keep:false면 남기지 않는다");
+  await h({ type: "analyze", run: 3, doc: { title: "t", text: "" }, comments: cs, useSemantic: false }, post);
+  await h({ type: "topics", run: 4, key: 3, v: 50 }, post);
+  assert.equal(out.at(-1).type, "topics", "패널 Worker(기본)는 그대로 남긴다");
+}
+
 console.log("all tests passed");

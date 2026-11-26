@@ -17,7 +17,7 @@ async function ensureOffscreen() {
   if (await hasOffscreen()) return;
   creating ??= chrome.offscreen.createDocument({
     url: OFFSCREEN, reasons: ["WORKERS"],
-    justification: "팝업이나 패널이 닫혀도 댓글 분석(임베딩·지도 계산)을 끝까지 하고, 그 탭이 열려 있는 동안 결과를 메모리에 둡니다.",
+    justification: "팝업이나 패널이 닫혀도 댓글 분석(임베딩·지도 계산)을 Web Worker에서 끝까지 돌리고, 그 탭이 열려 있는 동안 결과를 메모리에 둡니다.",
   }).catch((e) => { if (!/single offscreen/i.test(String(e?.message))) throw e; }).finally(() => { creating = null; });
   await creating;
 }
