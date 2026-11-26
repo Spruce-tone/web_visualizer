@@ -1435,6 +1435,36 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   delete globalThis.chrome;
 }
 
+// offscreen의 Worker 맡기기 (lib/offscreen-worker.js): 한 번 답한 뒤 멈추면 시간 제한 뒤 문서에서 계산하고, 그 뒤 일도 문서에서
+{
+  const { createWorkerHandler } = await import("../lib/offscreen-worker.js");
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let mode = "ok", terminated = 0;
+  const fake = { postMessage(m) { if (mode === "ok") setTimeout(() => this.onmessage({ data: { type: "done", run: m.run, from: "worker" } }), 0); else if (mode === "status-then-hang") setTimeout(() => this.onmessage({ data: { type: "status", run: m.run, text: "…" } }), 0); }, terminate() { terminated++; } };
+  const local = [];
+  const h = createWorkerHandler({ makeWorker: () => fake, fallback: () => (msg, post) => { local.push(msg.run); post({ type: "done", run: msg.run, from: "here" }); }, quietMs: 40 });
+  const ask = (run) => new Promise((r) => h({ type: "analyze", run }, (m) => { if (m.type !== "status") r(m); }));
+  assert.equal((await ask(1)).from, "worker", "평소엔 Worker가 한다");
+  mode = "status-then-hang"; // 진행 문구를 한 번 보내고 멈춤(죽음)
+  const t0 = Date.now();
+  const r2 = await ask(2);
+  assert.equal(r2.from, "here", "멈춘 Worker 대신 문서에서 끝낸다");
+  assert.ok(Date.now() - t0 >= 40, "시간 제한까지 기다린 뒤");
+  assert.equal(terminated, 1, "멈춘 Worker는 끝낸다");
+  mode = "ok";
+  assert.equal((await ask(3)).from, "here", "버린 Worker에는 다시 보내지 않는다(다른 탭의 분석도 멈추지 않음)");
+  // 불러오기 실패(한 번도 답하지 않고 오류) → 기다리던 일을 문서에서
+  const silent = { postMessage() {}, terminate() {} };
+  const h2 = createWorkerHandler({ makeWorker: () => silent, fallback: () => (msg, post) => post({ type: "done", run: msg.run, from: "here" }), quietMs: 10e3 });
+  const p = new Promise((r) => h2({ type: "analyze", run: 7 }, r));
+  silent.onerror({ message: "module load failed", preventDefault() {} });
+  assert.equal((await p).from, "here");
+  // Worker를 아예 못 만들면 처음부터 문서에서
+  const h3 = createWorkerHandler({ makeWorker: () => { throw new Error("no Worker"); }, fallback: () => (msg, post) => post({ type: "done", run: msg.run, from: "here" }) });
+  assert.equal((await new Promise((r) => h3({ type: "analyze", run: 8 }, r))).from, "here");
+  await wait(0);
+}
+
 // offscreen 분석(keep:false)은 Worker에 세밀도용 입력(원문·간선)을 남기지 않는다 → 탭이 닫혀도 남는 메모리가 없다
 {
   const { createHandler } = await import("../lib/worker-core.js");
