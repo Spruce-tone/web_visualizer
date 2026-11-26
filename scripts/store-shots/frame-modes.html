@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<style>
+@font-face { font-family: P; src: url("../../vendor/fonts/PretendardVariable.woff2") format("woff2"); font-weight: 100 900; }
+html, body { margin: 0; width: 1280px; height: 800px; overflow: hidden; }
+body { font-family: P, sans-serif; background: linear-gradient(160deg, #f5f7ff 0%, #e9eeff 100%); color: #172033; position: relative; }
+h1 { position: absolute; left: 64px; top: 54px; margin: 0; font-size: 40px; font-weight: 750; letter-spacing: -0.02em; }
+p { position: absolute; left: 64px; top: 112px; margin: 0; font-size: 21px; color: #4a5468; }
+.shot { position: absolute; border-radius: 14px; box-shadow: 0 18px 50px rgba(30, 50, 110, .18); border: 1px solid #d5dcef; background: #fff; overflow: hidden; }
+.panel { left: 64px; top: 176px; width: 300px; height: 600px; }
+.popup { left: 420px; top: 176px; width: 800px; height: 600px; }
+.shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.tag { position: absolute; top: 150px; font-size: 15px; font-weight: 650; color: #2b55e6; }
+</style></head>
+<body>
+  <h1>옆 패널로도, 아이콘 아래 창으로도</h1>
+  <p>창을 닫아도 분석은 끝까지 이어지고, 다시 열면 지도와 분류가 그대로 돌아옵니다.</p>
+  <div class="tag" style="left:64px">옆 패널</div>
+  <div class="tag" style="left:420px">아이콘 아래 창</div>
+  <div class="shot panel"><img src="out/raw-panel.png" style="width:400px;height:800px;transform:scale(.75);transform-origin:top left"></div>
+  <div class="shot popup"><img src="out/raw-popup.png"></div>
+</body></html>

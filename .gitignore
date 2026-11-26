@@ -5,3 +5,4 @@ dist/
 package-lock.json
 qa/
 fixtures/set/
+scripts/store-shots/out/
