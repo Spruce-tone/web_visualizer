@@ -14,6 +14,7 @@ import { authorFeatures, authorSignals, authorMap } from "../lib/authors.js";
 import { pileOns, SessionMemory } from "../lib/patterns.js";
 import { TONE_LABEL } from "../lib/tone.js";
 import { createGraph, TOPIC_COLORS, TAG_COLORS } from "./graph.js";
+import { getOpenMode, setOpenMode } from "../lib/open-mode.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -1099,6 +1100,22 @@ $("btn-export").onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
+// ---------- 아이콘을 누르면 (옆 패널 / 아이콘 아래 창) ----------
+// 고른 값은 브라우저가 기억하는 패널 동작 설정에 들어간다(lib/open-mode.js). 확장이 따로 저장하지 않는다.
+async function initOpenMode() {
+  const sel = $("open-mode");
+  try { sel.value = await getOpenMode(); } catch { sel.closest("label").hidden = true; return; } // 사이드 패널 API가 없는 브라우저
+  sel.onchange = async () => {
+    try {
+      const mode = await setOpenMode(sel.value);
+      setStatus(mode === "popup" ? "이제 아이콘을 누르면 아이콘 아래 창으로 열려요. 이 창은 그대로 쓸 수 있어요." : "이제 아이콘을 누르면 옆 패널로 열려요.");
+    } catch (e) {
+      sel.value = await getOpenMode().catch(() => "panel");
+      setStatus(`여는 방식을 바꾸지 못했어요 (${e.message})`, "error");
+    }
+  };
+}
+
 // ---------- 의미 모델 선택지 ----------
 async function initModels() {
   const sel = $("mode");
@@ -1131,7 +1148,7 @@ async function initModels() {
 }
 
 renderTags();
-const ready = Promise.all([initModels(), initWeights()]);
+const ready = Promise.all([initModels(), initWeights(), initOpenMode()]);
 if (fixedTab) restoreFromPanel();
 
 // 자동 점검용 연결 고리 (tests/panel-smoke.mjs). 확장 프로그램에서는 정의돼 있지 않아 아무 일도 하지 않는다.

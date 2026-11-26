@@ -58,7 +58,10 @@ globalThis.chrome = {
   },
   windows: { update: async () => {} },
   scripting: { executeScript: async () => {} },
+  sidePanel: { getPanelBehavior: async () => ({ openPanelOnActionClick: panelBehavior }), setPanelBehavior: async (o) => { panelBehavior = o.openPanelOnActionClick; } },
+  action: { setPopup: async (o) => { popupPath = o.popup; } },
 };
+let panelBehavior = true, popupPath = "";
 
 let api = null;
 globalThis.__WV_TEST__ = (a) => (api = a);
@@ -92,6 +95,15 @@ globalThis.Worker = class {
 const panelMod = await import("../sidepanel/sidepanel.js");
 assert.ok(api, "패널 스크립트가 끝까지 실행됨");
 await api.ready; // 모델·가중치 초기화가 끝날 때까지 (실제 시간에 기대지 않음)
+
+// 0) 아이콘을 누르면: 고르면 브라우저 설정 두 가지를 함께 바꾼다
+assert.equal(byId("open-mode").value, "panel");
+byId("open-mode").value = "popup";
+await byId("open-mode").onchange();
+assert.equal(panelBehavior, false); assert.ok(popupPath.endsWith("sidepanel.html?mode=popup"));
+byId("open-mode").value = "panel";
+await byId("open-mode").onchange();
+assert.equal(panelBehavior, true); assert.equal(popupPath, "");
 
 // 1) 분석 실행 (의미 모델은 Node에 없으므로 문구 기준 경로)
 await byId("btn-all").onclick();

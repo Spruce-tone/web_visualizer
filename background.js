@@ -1,7 +1,7 @@
-// 툴바 아이콘 클릭 시 사이드 패널 열기
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((e) => console.error(e));
+import { installOpenMode } from "./lib/open-mode.js";
+
+// 툴바 아이콘: 사이드 패널 또는 아이콘 아래 팝업 (고른 모드는 브라우저가 기억하는 패널 동작 설정에서 읽는다)
+installOpenMode();
 
 // 개발·점검용: YouTube 영상 주소 끝에 #wv-dev-open 을 붙이면 '크게 보기' 화면을 같은 탭 묶음의 새 탭으로 연다.
 // (자동화 도구가 확장 화면을 직접 눌러 보며 점검할 수 있게 하는 용도. 평소 사용에는 영향이 없다.)

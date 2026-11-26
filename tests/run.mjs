@@ -1256,4 +1256,47 @@ const { mergeSameKeywordTopics, topicLinkRatio } = await import("../lib/communit
   assert.equal(out[2].m.type, "error");
 }
 
+// 아이콘을 누르면: 브라우저가 기억하는 패널 동작 값을 기준으로 팝업 설정을 맞춘다 (lib/open-mode.js, 저장 없음)
+{
+  const OM = await import("../lib/open-mode.js");
+  const fake = (behavior) => {
+    const st = { behavior, popup: "", installed: null, log: [] };
+    st.api = {
+      sidePanel: {
+        getPanelBehavior: async () => { await null; return { openPanelOnActionClick: st.behavior }; },
+        setPanelBehavior: async ({ openPanelOnActionClick }) => { await null; st.behavior = openPanelOnActionClick; st.log.push("b" + +openPanelOnActionClick); },
+      },
+      action: { setPopup: async ({ popup }) => { await null; st.popup = popup; st.log.push("p" + (popup ? 1 : 0)); } },
+      runtime: { onInstalled: { addListener: (f) => (st.installed = f) } },
+    };
+    return st;
+  };
+  let f = fake(true);
+  assert.equal(await OM.getOpenMode(f.api), "panel");
+  assert.equal(await OM.setOpenMode("popup", f.api), "popup");
+  assert.equal(f.behavior, false); assert.equal(f.popup, OM.POPUP_PATH);
+  assert.equal(await OM.getOpenMode(f.api), "popup", "패널 동작 false = 팝업 모드");
+  await OM.setOpenMode("panel", f.api);
+  assert.equal(f.behavior, true); assert.equal(f.popup, "", "패널 모드면 팝업을 비운다");
+  // 브라우저를 다시 켬: 패널 동작(false)은 남고 팝업 설정은 비워진 상태 → 서비스 워커가 팝업을 다시 건다
+  f = fake(false);
+  let done = OM.installOpenMode(f.api);
+  await done();
+  assert.equal(f.popup, OM.POPUP_PATH, "기억된 팝업 모드를 깨어날 때 되살린다");
+  assert.equal(f.behavior, false);
+  // 업데이트는 고른 모드를 건드리지 않는다
+  f.installed({ reason: "update" }); await done();
+  assert.equal(f.popup, OM.POPUP_PATH);
+  // 처음 설치: 기본값(false)을 읽는 중에 설치 처리가 와도 끝 상태는 패널
+  f = fake(false);
+  done = OM.installOpenMode(f.api);
+  f.installed({ reason: "install" });
+  await done(); await done();
+  assert.equal(f.behavior, true, "처음 설치는 옆 패널");
+  assert.equal(f.popup, "");
+  // 기존 사용자(0.11.2까지 매번 true로 켬)는 업데이트 뒤에도 패널
+  f = fake(true); done = OM.installOpenMode(f.api); f.installed({ reason: "update" }); await done();
+  assert.equal(f.popup, ""); assert.equal(f.behavior, true);
+}
+
 console.log("all tests passed");
