@@ -204,7 +204,7 @@ Comment { id, docId, parentId, author, authorId, text, likes, createdAtRaw, crea
 | `activeTab`만 | 권한 경고 없음 | 아이콘을 누른 순간·그 탭에만 잠깐. 사이드 패널을 연 뒤 페이지를 옮기면 사라짐. 사이드 패널 열기와 함께 주어지는지 **확인 안 함** |
 
 - YouTube는 지금처럼 기본 권한으로 둡니다(이미 받은 권한).
-- `scripting`, `sidePanel`, `activeTab` 외 새 API 권한(`storage`, `cookies`, `webRequest` 등)은 **더하지 않습니다**. 켠 사이트 목록은 브라우저가 권한으로 기억하므로 따로 저장할 필요가 없습니다.
+- 지금 API 권한은 `sidePanel`, `scripting`, `offscreen`입니다(v0.12.1에서 `activeTab`은 뺐음: YouTube 호스트 권한으로 충분). 이 밖의 새 API 권한(`activeTab`, `storage`, `cookies`, `webRequest` 등)은 **더하지 않습니다**. 위 표의 `activeTab` 방식을 고르면 그때 다시 넣어야 합니다. 켠 사이트 목록은 브라우저가 권한으로 기억하므로 따로 저장할 필요가 없습니다.
 - COEP/COOP(확장 페이지 설정)는 content script와 상관없어 그대로 둡니다.
 
 ---
