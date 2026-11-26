@@ -13,6 +13,8 @@
 | 이름 | Web Visualizer (`manifest.json`의 `name`) |
 | 요약(최대 132자) | `manifest.json`의 `description`이 쓰입니다. 0.12.1 뒤로 아래 2절 한국어 문구와 같습니다. |
 | 카테고리 | **생산성 › 도구 (Productivity › Tools)** (대안: 생산성 › 교육) |
+| 가격 | **무료, 결제·광고 없음** (결제·광고를 묻는 칸은 모두 '없음/아니요') |
+| 공개 범위 | **공개 (Public)** |
 | 언어 | 한국어 (영어 설명은 '언어 추가'로 함께 넣음) |
 | 홈페이지 | https://github.com/Spruce-tone/web_visualizer |
 | 지원 사이트 | https://github.com/Spruce-tone/web_visualizer/issues |
@@ -61,6 +63,7 @@ Web Visualizer는 YouTube 영상의 댓글을 모아 기기 안에서 분석하�
 • GPU(WebGPU)가 있으면 GPU로, 없으면 CPU로 계산합니다.
 
 지금은 YouTube 영상 페이지에서 동작합니다.
+무료이며 결제나 광고가 없습니다.
 소스 코드: https://github.com/Spruce-tone/web_visualizer
 ```
 
@@ -86,6 +89,7 @@ Scores use behavior and structure only (shared wording, number of authors, timin
 • Runs on your GPU (WebGPU) when available, otherwise on the CPU.
 
 Works on YouTube video pages for now. The interface is in Korean.
+Free, with no payments or ads.
 Source code: https://github.com/Spruce-tone/web_visualizer
 ```
 
