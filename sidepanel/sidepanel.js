@@ -313,9 +313,12 @@ async function showAnalysis(tab, { doc, comments, A, fallback }, { job = null, r
 
   const sec = (ms) => `${(ms / 1000).toFixed(1)}초`;
   const parts = [`댓글 ${num(n)}개 분석 완료`, `문구 ${sec(A.times.lex)}`, A.semantic ? `의미 ${sec(A.times.sem)} (${A.where})` : null, `지도 ${sec(A.times.map)}`].filter(Boolean);
-  if (reopened) parts.unshift("창이 닫힌 사이 끝난 분석을 열었어요");
+  if (reopened) parts.unshift("이 영상의 분석 결과를 다시 열었어요");
   setStatus([parts.join(" / "), ...notes].join(" — "), notes.length ? "error" : "");
+  showMapInPopup();
 }
+// 팝업은 높이가 600px뿐이라 조작부 아래 지도가 첫 화면에 안 보인다 → 결과가 나오면 결과 쪽으로 내려 준다(위로 올리면 조작부)
+function showMapInPopup() { if (popupMode) $("result").scrollIntoView?.({ block: "start" }); }
 
 // ---------- offscreen 분석 문서와 주고받기 (offscreen/offscreen.js, lib/offscreen-core.js) ----------
 // 결과는 그 문서의 메모리에만 있고, 탭이 닫히거나 다른 영상으로 가면 지워진다. 이 창은 열릴 때 받아 그리고, 화면 상태(분류·옮긴 자리 등)를 넘겨 둔다.
@@ -1122,6 +1125,7 @@ function applySnapshot(snap, msg) {
   setSlider("th-lex", snap.thLex);
   rebuild({ fresh: true, restore: { tags: snap.tags, pos: snap.pos } });
   setStatus(msg);
+  showMapInPopup();
 }
 
 // ---------- 점수 기준 (기본 규칙 / 공개 데이터 보정) ----------
