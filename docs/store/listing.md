@@ -148,4 +148,4 @@ No account or login is needed.
 ```
 
 ## 9. 버전
-스토어 첫 제출은 **1.0.0**으로 올리기를 제안합니다(지금 0.12.1). 바꾸려면 `manifest.json`·`package.json`의 `version`만 고치면 됩니다. 결정은 Spruce.
+스토어 첫 제출은 **1.0.0** (Spruce 결정).

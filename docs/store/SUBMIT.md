@@ -3,7 +3,7 @@
 붙여 넣을 문구는 모두 [listing.md](listing.md)에 있습니다. 개발자 등록(1회 등록비)은 끝났다고 보고 그다음부터 적습니다.
 
 ## 0. 제출 전에 (Spruce 결정)
-- [ ] 버전: 0.12.1 그대로 낼지, **1.0.0**으로 올릴지 (제안: 1.0.0). 올리면 `manifest.json`·`package.json`의 `version`을 고쳐 커밋 → push.
+- [x] 버전: **1.0.0** (Spruce 결정).
 - [ ] 영어 요약을 따로 보일지(`_locales` 추가 여부). 안 하면 요약은 한국어 하나.
 - [ ] 개인정보 관행에서 '웹사이트 콘텐츠'를 밝힐지(권장, listing.md 7절).
 - [x] 가격: **무료, 결제·광고 없음** (Spruce 결정). 수익을 내지 않습니다.
@@ -13,7 +13,7 @@
 manifest.json이 **zip 맨 위**에 있어야 합니다(폴더로 감싸면 거부됨).
 - 가장 쉬운 길: main에 push하면 GitHub Actions가 Releases(`latest-build`)에 **`web-visualizer-store.zip`**을 함께 올립니다. 그것을 받습니다.
   `https://github.com/Spruce-tone/web_visualizer/releases/latest/download/web-visualizer-store.zip`
-- 로컬에서 만든 것(0.12.1 기준): `D:\side_project\web_visualizer\dist\web-visualizer-store-0.12.1.zip` (약 10MB, 파일 49개: manifest.json, background.js, content/, icons/, lib/, offscreen/, sidepanel/, vendor/). 테스트·qa·fixtures·docs·scripts는 들어 있지 않습니다.
+- 로컬에서 만든 것(1.0.0 기준): `D:\side_project\web_visualizer\dist\web-visualizer-store-1.0.0.zip` (약 10MB, 파일 49개: manifest.json, background.js, content/, icons/, lib/, offscreen/, sidepanel/, vendor/). 테스트·qa·fixtures·docs·scripts는 들어 있지 않습니다.
 - 버전을 바꿨다면 zip도 새로 받아야 합니다(스토어는 같은 버전 번호를 두 번 받지 않음).
 
 ## 2. 새 항목 만들기
@@ -54,7 +54,7 @@ listing.md 8절 영어 문구를 붙여 넣습니다. 로그인이 필요 없는
 - 반려되면 메일에 이유(정책 번호)가 옵니다. 고친 뒤 **버전을 올려** 다시 올립니다.
 
 ## 선택 사항
-- 저장소에 **LICENSE 파일이 없습니다**. 없으면 남이 코드를 다시 쓸 권리가 정해지지 않습니다(보기·설치는 상관없음). 어떤 라이선스를 쓸지(또는 두지 않을지)는 Spruce가 정합니다. 아직 추가하지 않았습니다.
+- 라이선스 파일(LICENSE): **지금은 넣지 않음, 나중에 결정** (Spruce 결정. 나중에 수익화를 생각할 수 있어서). 없으면 남이 코드를 다시 쓸 권리는 정해지지 않으며, 스토어 등록·설치에는 상관없습니다.
 
 ## 8. 통과 뒤
 - 스토어 주소를 README의 설치 칸(지금 '나중에 채울 자리')에 넣습니다.
