@@ -40,7 +40,9 @@ jobs:
           cp -r manifest.json background.js content icons lib offscreen sidepanel vendor dist/web-visualizer/
           if [ -f calibration/weights.json ]; then mkdir -p dist/web-visualizer/calibration && cp calibration/weights.json dist/web-visualizer/calibration/; fi
           cd dist && zip -qr web-visualizer.zip web-visualizer
-          ls -lh web-visualizer.zip
+          # 크롬 웹 스토어 제출용: manifest.json이 zip 맨 위에 있어야 한다 (설치용 zip은 폴더 하나로 감쌈)
+          (cd web-visualizer && zip -qr ../web-visualizer-store.zip .)
+          ls -lh web-visualizer.zip web-visualizer-store.zip
 
       - name: Publish release (rolling "latest-build")
         env:
@@ -48,8 +50,8 @@ jobs:
         run: |
           VERSION=$(node -p "require('./manifest.json').version")
           gh release delete latest-build --yes --cleanup-tag || true
-          gh release create latest-build dist/web-visualizer.zip \
+          gh release create latest-build dist/web-visualizer.zip dist/web-visualizer-store.zip \
             --target "${{ github.sha }}" \
             --latest \
             --title "Web Visualizer v${VERSION} (build ${{ github.run_number }})" \
-            --notes "설치: zip 압축 해제 → chrome://extensions → 개발자 모드 → '압축해제된 확장 프로그램을 로드' → 풀린 web-visualizer 폴더 선택. 커밋: ${{ github.sha }}"
+            --notes "설치: zip 압축 해제 → chrome://extensions → 개발자 모드 → '압축해제된 확장 프로그램을 로드' → 풀린 web-visualizer 폴더 선택. (web-visualizer-store.zip은 크롬 웹 스토어 제출용) 커밋: ${{ github.sha }}"
