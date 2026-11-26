@@ -12,7 +12,7 @@
 manifest.json이 **zip 맨 위**에 있어야 합니다(폴더로 감싸면 거부됨).
 - 가장 쉬운 길: main에 push하면 GitHub Actions가 Releases(`latest-build`)에 **`web-visualizer-store.zip`**을 함께 올립니다. 그것을 받습니다.
   `https://github.com/Spruce-tone/web_visualizer/releases/latest/download/web-visualizer-store.zip`
-- 로컬에서 만든 것(0.12.1 기준): `D:\side_project\web_visualizer\dist\web-visualizer-store-0.12.1.zip` (약 10MB, 파일 47개: manifest.json, background.js, content/, icons/, lib/, offscreen/, sidepanel/, vendor/). 테스트·qa·fixtures·docs·scripts는 들어 있지 않습니다.
+- 로컬에서 만든 것(0.12.1 기준): `D:\side_project\web_visualizer\dist\web-visualizer-store-0.12.1.zip` (약 10MB, 파일 49개: manifest.json, background.js, content/, icons/, lib/, offscreen/, sidepanel/, vendor/). 테스트·qa·fixtures·docs·scripts는 들어 있지 않습니다.
 - 버전을 바꿨다면 zip도 새로 받아야 합니다(스토어는 같은 버전 번호를 두 번 받지 않음).
 
 ## 2. 새 항목 만들기
