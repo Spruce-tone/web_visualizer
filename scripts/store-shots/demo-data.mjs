@@ -48,6 +48,8 @@ export function demoFixture({ n = 330, seed = 7 } = {}) {
   for (let i = 0; i < 24; i++) add(pick(SHORT));
   // 같은 문구를 여러 계정이 짧은 시간에 (복붙 의심 신호가 보이게)
   for (let i = 0; i < 9; i++) add(SPAM + (i % 3 ? "" : "!"), { author: "홍보" + i, authorId: "@promo" + i, likes: 0, createdAtRaw: "2시간 전", createdAtApprox: new Date(now - 2 * 3600e3 - i * 60e3).toISOString() });
+  // 한 계정이 같은 홍보 문구를 여러 번 (작성자 탭에 강조되는 작성자가 보이게)
+  for (let i = 0; i < 5; i++) add(SPAM + (i % 2 ? " 감사합니다" : ""), { author: "홍보0", authorId: "@promo0", likes: 0, createdAtRaw: "1시간 전", createdAtApprox: new Date(now - 3600e3 - i * 90e3).toISOString() });
   const doc = { id: "youtube:DEMO", site: "youtube", url: "https://www.youtube.com/watch?v=DEMO", title: "시장에서 장 보고 손칼국수 끓이기 (예시 영상)", author: "예시 요리 채널", publishedAt: null, text: "시장 구경, 반죽, 육수 내기", meta: { videoId: "DEMO", totalComments: 2400, collection: { sort: "random", complete: false, pool: { size: 1260, limit: 1260, complete: false } } }, extractedAt: new Date(now).toISOString() };
   return { doc, comments };
 }
