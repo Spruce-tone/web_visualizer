@@ -25,14 +25,14 @@
 
 ## 2. 요약 (132자 이내)
 
-**한국어 (83자)**
+**한국어 (86자)**
 ```
-YouTube 영상 댓글을 기기 안에서 분석해 주제 지도로 보여 주고, 문구가 거의 같은 댓글 같은 신호를 근거와 함께 표시합니다. 저장·전송 없음.
+YouTube 영상 댓글을 기기 안에서 분석해 주제 지도로 보여 주고, 문구가 거의 같은 댓글 같은 신호를 근거와 함께 표시합니다. 댓글 저장·전송 없음.
 ```
 
-**English (127 chars)**
+**English (131 chars)**
 ```
-See YouTube comments as an on-device topic map, with signals like near-identical wording shown with their evidence. No storage.
+See YouTube comments as an on-device topic map, with signals like shared wording and the evidence. Comments are not stored or sent.
 ```
 
 > 요약은 매니페스트의 `description`에서 옵니다(위 한국어 문구로 바꿔 둠). 영어 요약을 따로 보이게 하려면 `_locales/ko`, `_locales/en`과 `default_locale`이 필요합니다(선택, Spruce 결정).
