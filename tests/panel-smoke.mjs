@@ -353,4 +353,26 @@ assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안
   await byId("btn-all").onclick();
   assert.ok(String(byId("status").textContent).includes("답글은 받지 못했어요"), "후보 단계에서 막히면 답글을 못 받았다고 알린다");
 }
+// 8) 툴바 아이콘 아래 창(팝업, ?mode=popup): 같은 패널 코드가 팝업 배치로 뜨고, '옆 패널로 열기'로 옮길 수 있다
+{
+  globalThis.location = { search: "?mode=popup" };
+  let opened = null, closed = 0;
+  chrome.windows.getCurrent = async () => ({ id: 7 });
+  chrome.sidePanel.open = async (o) => { opened = o; };
+  globalThis.close = () => closed++;
+  api = null;
+  await import("../sidepanel/sidepanel.js?popup");
+  assert.ok(api, "팝업 모드로도 패널 스크립트가 끝까지 실행됨");
+  await api.ready;
+  assert.equal(api.popupMode, true);
+  assert.equal(byId("btn-to-panel").hidden, false, "팝업에서는 '옆 패널로 열기' 단추가 보인다");
+  assert.equal(await api.openSidePanel(), true);
+  assert.deepEqual(opened, { windowId: 7 }, "지금 창의 옆 패널을 연다");
+  assert.equal(closed, 1, "옆 패널을 열면 팝업은 닫는다");
+  delete chrome.sidePanel.open;
+  assert.equal(await api.openSidePanel(), false);
+  assert.match(String(byId("status").textContent), /옆 패널을 바로 열 수 없어요/, "sidePanel.open이 없는 브라우저는 안내");
+  assert.equal(closed, 1, "열지 못하면 팝업을 닫지 않는다");
+}
+
 console.log("panel smoke passed");

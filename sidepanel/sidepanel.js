@@ -23,6 +23,8 @@ const keyOf = (c) => c.authorId || c.author;
 const MAX_TAGS = 9;
 const TONE_TINT = { condemn: ["#7048E8", "#B197FC"], praise: ["#0B7285", "#66D9E8"], mixed: ["#868E96", "#ADB5BD"], none: ["#C5CCD8", "#3A4458"] };
 const fixedTab = Number(new URLSearchParams(location.search).get("tab")) || null; // 크게 보기 모드
+const popupMode = !fixedTab && new URLSearchParams(location.search).get("mode") === "popup"; // 툴바 아이콘 아래 창
+if (popupMode) document.documentElement.classList.add("popup");
 
 // 모든 상태는 메모리에만. 창을 닫으면 사라진다.
 let S = null;            // 분석 결과 (영상 하나)
@@ -47,6 +49,10 @@ let topicCache = new Map(); // 세밀도 값 → 주제 나누기 결과 (분석
 
 $("ver").textContent = "v" + chrome.runtime.getManifest().version;
 if (fixedTab) $("btn-wide").hidden = true;
+if (popupMode) {
+  $("btn-to-panel").hidden = false;
+  $("empty").querySelector("p:last-child").textContent = "댓글을 점으로 찍은 지도가 그려집니다. 비슷한 이야기끼리 모이고, 문구를 베낀 듯한 댓글은 따로 표시됩니다. 이 창은 페이지를 누르면 닫혀요. 오래 볼 때는 '옆 패널로 열기'나 '크게 보기'를 쓰세요. 수집한 내용은 저장하지 않습니다.";
+}
 
 const graph = createGraph($("graph"), $("tooltip"), {
   onPick: (i) => {
@@ -1046,6 +1052,22 @@ $("btn-cancel").onclick = () => {
   setStatus("중지하는 중. 지금까지 모은 댓글로 분석합니다.", "busy");
   send("WV_CANCEL").catch(() => {});
 };
+// 팝업 → 옆 패널: 단추 누름이 사용자 동작이라 sidePanel.open을 부를 수 있다. 창 id는 미리 받아 두고 바로 연다.
+let popupWindowId = null;
+if (popupMode) chrome.windows?.getCurrent?.().then((w) => (popupWindowId = w.id), () => {});
+async function openSidePanel() {
+  try {
+    if (!chrome.sidePanel?.open) throw new Error("no sidePanel.open");
+    const windowId = popupWindowId ?? (await chrome.windows.getCurrent()).id;
+    await chrome.sidePanel.open({ windowId });
+  } catch (e) {
+    setStatus("이 브라우저에선 옆 패널을 바로 열 수 없어요. '아이콘을 누르면'을 '옆 패널로 열기'로 바꾼 뒤 아이콘을 다시 눌러 주세요.", "error");
+    return false;
+  }
+  window.close();
+  return true;
+}
+$("btn-to-panel").onclick = () => openSidePanel();
 $("btn-wide").onclick = async () => {
   try {
     const tab = await targetTab();
@@ -1152,4 +1174,4 @@ const ready = Promise.all([initModels(), initWeights(), initOpenMode()]);
 if (fixedTab) restoreFromPanel();
 
 // 자동 점검용 연결 고리 (tests/panel-smoke.mjs). 확장 프로그램에서는 정의돼 있지 않아 아무 일도 하지 않는다.
-globalThis.__WV_TEST__?.({ ready, graph, rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });
+globalThis.__WV_TEST__?.({ ready, popupMode, openSidePanel, graph, rebuild, drawMap, setMapMode, showDetail, showAuthor, snapshot, gotoComment, checkVideo, revealInList, pickFromList, listFromSelection, setList, state: () => ({ S, V, shown, mapMode, listSrc, listRows, listActive }) });
