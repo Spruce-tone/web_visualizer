@@ -23,7 +23,10 @@ async function ensureOffscreen() {
 const tellOffscreen = async (m) => { if (await hasOffscreen()) chrome.runtime.sendMessage(m).catch(() => {}); };
 const videoIdOf = (url) => { try { return url?.includes("youtube.com/watch") ? new URL(url).searchParams.get("v") : null; } catch { return null; } };
 chrome.tabs.onRemoved.addListener((tabId) => tellOffscreen({ type: "WV_JOB_DROP", tabId }));
-chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.url) tellOffscreen({ type: "WV_JOB_URL", tabId, videoId: videoIdOf(info.url) }); });
+// tabs 권한이 없어 YouTube 밖으로 나간 탭은 주소가 안 보인다(info.url도 tab.url도 없음) → 영상 아님(null)으로 알려 지우게 한다
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.url || info.status === "loading") tellOffscreen({ type: "WV_JOB_URL", tabId, videoId: videoIdOf(info.url || tab?.url) });
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "WV_OFFSCREEN_ENSURE") {
