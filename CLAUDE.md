@@ -4,7 +4,7 @@
 웹 문서(YouTube, 구글 문서, 커뮤니티)와 댓글을 시각화해 문서 성격 파악 + 댓글 조작 의심 신호와 실제 반응 구분. 옵시디언 그래프 뷰의 웹 버전.
 
 ## 방향 (2026-11-24 결정)
-- **저장하지 않는다.** 문서/댓글/임베딩은 사이드 패널 메모리에만. IndexedDB·storage 권한 쓰지 않음.
+- **저장하지 않는다.** 문서/댓글/임베딩은 메모리에만(분석 결과는 offscreen 문서의 탭별 메모리, 화면은 패널·팝업 메모리). IndexedDB·storage 권한 쓰지 않음. 탭을 닫거나 다른 영상으로 가면 지운다.
 - **임베딩 우선, 속도 우선.** 임계값 변경 등 UI 조작은 임베딩 재계산 없이 캐시된 top-k 이웃으로 처리.
 - **역할 분리 (v0.2)**: 문구 임베딩(n-gram 해싱) = 복붙·템플릿 의심 신호 / 의미 임베딩(자동: Bekko a25m, GPU 있으면 GPU로 — 검증 세트 근거 `docs/validation.md` / 선택 EmbeddingGemma-300M·Qwen3-Embedding-0.6B) = 지도 배치·주제 묶음. 의미 모델 실패 시 문구 임베딩으로 대체.
 - 의미 유사도 임계값은 모델 분포에 맞춰 적응형(`adaptiveThreshold`)으로 기본값 설정.
@@ -29,10 +29,13 @@
 - v0.11.0 ✅ 분석을 Web Worker로: 계산은 `lib/pipeline.js` 한곳(수집 뒤 문구 이웃 → 의미 임베딩 → 의미 이웃 → UMAP → 패턴 → 첫 주제·세밀도 단추 수·평가 낱말), `lib/analysis-worker.js`(module, 처리는 `lib/worker-core.js`)가 Transformers.js까지 돌림(Edge: Worker 안에서 WebGPU·crossOriginIsolated 둘 다 됨). 세밀도 바꾸기도 Worker. Worker를 못 만들거나 불러오기 실패·응답 없음(분석 180초, 주제 30초)이면 같은 pipeline을 패널에서 → 결과 같음(Edge 지문 1,000/3,000개, GPU·CPU 동일). 패널 최장 멈춤: 1,000개 2.0→0.1초, 3,000개 3.6→0.25초, CPU 1,000개 16.6→0.13초(`qa/2026-11-29`). 힘 배치 tick은 메인 유지(3,000개 5.6ms) / 목록에서 누른 점: 굵은 테 + 잠깐 깜박임 / 후보 단계에서 요청 제한으로 멈추면 "답글은 받지 못했어요"
 - v0.11.1 ✅ 수집 재측정(0bb27bc 뒤 300개 9.1초·1,000개 25.9초, 요청 수·표본 같음 → 응답 시간 차이) / 시험이 실제 시간에 기대지 않음(`sampleRandom` `now` 주입·가짜 시계, 패널 시험은 `api.ready` 기다림) / 지도(`lib/layout.js`): alpha < 0.1이면 감쇠 0.95(멈출 때까지 117→78프레임, 실루엣·섬 그대로), 프레임당 최대 4틱(지난 틱 시간 포함 6ms 안), 주제가 바뀐 채 이어받으면 첫 자리 잡기 동안만 이전 자리로 약하게 당김(`REGROUP_HOLD` 0.03, 멈추거나 다시 데우면 지움: 세밀도 변경 이동 2.07→1.60, 새 주제 실루엣 0.357→0.330), 보조 주제 댓글은 그 주제를 끌면 반쯤 따라옴(`EXTRA_FOLLOW`). 측정: 검증 세트 캐시 임베딩으로 `qa/2026-11-30`
 - v0.11.2 ✅ 실제 화면 점검(`qa/2026-12-01`): 진짜 사이드 패널(382px)에서 COI·Worker·SharedArrayBuffer·WebGPU 됨, 지도 조작 1,000/3,000개 모두 약 120fps(입력→프레임 p95 8~18ms) / 좁은 폭 고침: 결과 탭은 가로 스크롤에 숨기지 않고 줄바꿈, 820px 아래에선 지도 조작부를 지도 위 띠로(숨기지 않음, 툴팁은 캔버스 위치만큼 보정), 댓글 목록 격자 `minmax(0,1fr)`(긴 주제 이름 때문에 360px에서 가로 넘침), `--muted` #667083(대비 4.5:1 이상)
+- v0.12.0 ✅ 아이콘 아래 창(팝업) 옵션(`qa/2026-12-02`): '아이콘을 누르면' 옆 패널/아이콘 아래 창. 고른 값은 브라우저가 기억하는 `sidePanel` 동작 설정(false = 팝업)에 두고, 기억되지 않는 `action.setPopup`은 서비스 워커가 깰 때마다 맞춤(`lib/open-mode.js`, 처음 설치는 패널, storage 없음. 재시작 뒤 유지 확인) / 팝업 = `sidepanel.html?mode=popup`(내용 폭 784px+스크롤 막대 자리, 결과가 나오면 결과로 스크롤, '옆 패널로 열기') / 분석을 offscreen 문서(`offscreen/`, 권한 `offscreen`, 설치 경고 없음, 안에서 COI·SAB·WebGPU·Worker 됨)로: content script가 수집 응답을 그쪽으로 바로 보내고(`deliver`), `lib/offscreen-core.js`가 worker-core로 분석해 탭별 메모리에 둠(`lib/job-store.js`: 탭 닫힘·다른 영상이면 지움, 끝난 결과 4개 넘으면 오래된 것부터, 비면 1분 뒤 문서 닫음). 팝업·사이드 패널·크게 보기는 열릴 때 그 탭의 결과/진행 중 작업을 이어받고 화면 상태(분류·옮긴 자리·기준값)를 넘겨 둠. 형식 배열·Map은 `lib/wire.js`로 JSON 메시지를 지남. offscreen을 못 쓰면 예전처럼 패널 안에서 분석
 - 다음: 공개 데이터 보정(데이터 21GB parquet → 변환 필요), 욕설·별명 키워드를 가릴지 결정
 - M3 사이트 어댑터 추가 (네이버 뉴스, 커뮤니티 1곳, 일반 기사)
 
 ## 참고
+- 확장 메시지: 패널 → `WV_OFFSCREEN_ENSURE`(서비스 워커가 문서 만듦) → `WV_JOB_START` → content `WV_COLLECT_ALL{deliver}` → content `WV_COLLECTED` → offscreen 분석 → `WV_JOB_UPDATE` 알림 → 패널 `WV_JOB_GET`. offscreen 문서는 `chrome.runtime`만 쓸 수 있어 탭 닫힘·주소 변경은 서비스 워커가 `WV_JOB_DROP`/`WV_JOB_URL`로 알린다.
+- 팝업 점검: headless Edge에서도 서비스 워커의 `chrome.action.openPopup()`으로 진짜 팝업이 열린다(`qa/2026-12-02/tools/real.mjs`). `--load-extension` 확장은 개발자 모드가 꺼진 프로필에서 재시작하면 Edge가 꺼 버리므로 시험 프로필은 개발자 모드를 켠다.
 - 댓글 열기 순서: 화면에 있음 → `wv-show-comment`(댓글 영역만 다시 불러오기, 기본) → `wv-navigate`(YouTube 내부 이동, 광고 위험) → 패널의 MAIN world 실행 → 스크롤 탐색. 주소를 바꿔 popstate를 쏘는 방법은 전체 새로고침이 되므로 쓰지 않는다.
 - 개발·점검: 영상 주소 끝에 `#wv-dev-open` 을 붙이면 '크게 보기'가 같은 탭 묶음에 열린다 (자동화 도구로 화면 점검용).
 - 주제는 k-평균(lib/cluster.js)에서 커뮤니티로 바꿨다. k-평균은 이웃 찾기의 구역 나누기에만 쓴다.
