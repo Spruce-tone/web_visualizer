@@ -289,7 +289,7 @@ async function analyzeHere(tab, res, useSemantic, mode) {
 }
 
 /** 분석 결과를 화면에 올린다. job이 있으면 offscreen 문서에 있는 결과 (화면 상태를 그쪽에 넘겨 둔다) */
-async function showAnalysis(tab, { doc, comments, A, fallback }, { job = null, reopened = false } = {}) {
+async function showAnalysis(tab, { doc, comments, A, fallback }, { job = null, reopened = false, ui = null } = {}) {
   const notes = [];
   if (fallback) notes.push(`전체 수집이 안 돼서 화면에 보이는 댓글만 분석했어요 (${fallback})`);
   if (doc.meta.collection?.cancelled) notes.push("중지해서 모은 만큼만 분석했어요");
@@ -306,9 +306,17 @@ async function showAnalysis(tab, { doc, comments, A, fallback }, { job = null, r
   memory.add(doc, comments);
   picked = -1; savedTags = null; V = null; mapMode = "comments";
   showResult();
-  setRes(FIRST_RES);
-  renderPresets();
-  rebuild({ fresh: true });
+  if (ui) { // 다시 열기: 넘겨 두었던 화면 상태(분류·기준값·옮긴 자리)를 얹는다
+    tagDefs = ui.tagDefs;
+    setRes(Number(ui.res));
+    renderPresets();
+    setSlider("th-lex", ui.thLex);
+    rebuild({ fresh: true, restore: { tags: ui.tags, pos: ui.pos } });
+  } else {
+    setRes(FIRST_RES);
+    renderPresets();
+    rebuild({ fresh: true });
+  }
   await checkVideo();
 
   const sec = (ms) => `${(ms / 1000).toFixed(1)}초`;
@@ -355,9 +363,8 @@ function decodeResult(wire) {
   return { ...r, A: { ...r.A, lexVecs: viewVectors(r.A.lexVecs) } };
 }
 /** offscreen에 있는 결과를 연다: 넘겨 둔 화면 상태가 있으면 그대로, 없으면 분석 결과에서 새로 */
-function openJobResult(tab, e, msg) {
-  if (e.ui?.S) { applySnapshot(e.ui, msg); S.job = e.job; }
-  else showAnalysis(tab, decodeResult(e.result), { job: e.job, reopened: true });
+function openJobResult(tab, e) {
+  return showAnalysis(tab, decodeResult(e.result), { job: e.job, reopened: true, ui: e.ui });
 }
 /** 열릴 때(사이드 패널·팝업): 지금 탭에 offscreen 결과나 진행 중인 분석이 있으면 이어받는다 */
 async function attachToTab() {
@@ -366,7 +373,7 @@ async function attachToTab() {
   if (!vid || S) return;
   const e = await jobGet(tab.id);
   if (!e?.phase || e.videoId !== vid || S) return;
-  if (e.phase === "done") return openJobResult(tab, e, "이 영상의 분석 결과를 그대로 다시 열었어요.");
+  if (e.phase === "done") return openJobResult(tab, e);
   if (e.phase === "error") return setStatus(e.error, "error");
   setBusy(true);
   setStatus(e.status || "분석 중", "busy");
@@ -381,7 +388,7 @@ let uiTimer = 0;
 function pushUi() {
   clearTimeout(uiTimer);
   if (!S?.job) return;
-  chrome.runtime.sendMessage({ type: "WV_JOB_UI", tabId: S.tabId, job: S.job, ui: snapshot() }).catch(() => {});
+  chrome.runtime.sendMessage({ type: "WV_JOB_UI", tabId: S.tabId, job: S.job, ui: uiState() }).catch(() => {}); // 결과는 offscreen에 이미 있으니 화면 상태만
 }
 const scheduleUi = () => { if (!S?.job) return; clearTimeout(uiTimer); uiTimer = setTimeout(pushUi, 500); };
 for (const ev of ["pointerup", "change", "keyup", "click"]) document.addEventListener(ev, scheduleUi, true);
@@ -1095,16 +1102,20 @@ function renderTags(counts = []) {
 }
 
 // ---------- 크게 보기로 넘겨주기 ----------
-function snapshot() {
+/** 화면 상태만 (분류 이름·세밀도·문구 기준·내 분류·점 자리) */
+function uiState() {
   if (shown === "comments") savedTags = Array.from(graph.tagsArray());
   const L = V?.commentLayout;
-  const { names, lexVecs, workerKey, ...plain } = S; // Map은 넘기지 않는다. 벡터는 문자열 하나로 묶어 넘긴다
   return {
-    S: plain, lexVecs: lexVecs ? packVectors(lexVecs) : null, tagDefs,
-    res: $("res-range").value, thLex: $("th-lex").value,
+    tagDefs, res: $("res-range").value, thLex: $("th-lex").value,
     tags: savedTags,
     pos: L ? { x: Array.from(L.x), y: Array.from(L.y), pin: Array.from(L.pin) } : null,
   };
+}
+function snapshot() {
+  const ui = uiState();
+  const { names, lexVecs, workerKey, ...plain } = S; // Map은 넘기지 않는다. 벡터는 문자열 하나로 묶어 넘긴다
+  return { S: plain, lexVecs: lexVecs ? packVectors(lexVecs) : null, ...ui };
 }
 async function restoreFromPanel() {
   const snap = await chrome.runtime.sendMessage({ type: "WV_STATE_REQUEST", tabId: fixedTab }).catch(() => null);

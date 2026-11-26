@@ -417,6 +417,10 @@ assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안
   p.graph.select([1, 2]); p.graph.tagSelection(0);
   await p.pushUi();
   assert.equal(core.store.get(1).ui.tags[1], 0, "고른 분류가 offscreen에 넘어간다");
+  assert.equal(core.store.get(1).ui.S, undefined, "결과는 이미 offscreen에 있으니 화면 상태만 보낸다(댓글 원문을 다시 보내지 않음)");
+  byId("th-lex").value = 0.7; byId("res-range").value = 75;
+  await p.pushUi();
+  byId("th-lex").value = 0.6; byId("res-range").value = 50; // 다음 창은 처음 값으로 열린다고 치고
 
   // b) 다시 열기(팝업을 닫았다 엶): 수집·분석 없이 그대로
   collects = 0;
@@ -425,7 +429,9 @@ assert.equal(byId("video-changed").hidden, true, "새 영상을 분석하면 안
   assert.equal(collects, 0, "다시 열 때 다시 모으지 않는다");
   assert.equal(p.state().S?.comments.length, fixture.comments.length, "다시 열면 결과가 돌아온다");
   assert.equal(p.graph.tagsArray()[1], 0, "내 분류도 그대로");
-  assert.match(String(byId("status").textContent), /그대로 다시 열었어요/);
+  assert.equal(Number(byId("th-lex").value), 0.7, "문구 기준도 그대로");
+  assert.equal(Number(byId("res-range").value), 75, "세밀도도 그대로");
+  assert.match(String(byId("status").textContent), /다시 열었어요/);
 
   // c) 계산 도중 닫힘: 앞 창이 기다리는 동안 새 창이 열리면 진행 중인 작업을 이어받아 끝난 결과를 그린다
   delay = 30;
