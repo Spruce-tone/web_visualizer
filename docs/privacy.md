@@ -32,7 +32,7 @@ Web Visualizer(이하 "확장")는 YouTube 영상의 댓글을 사용자의 기�
 - 확장이 연결하는 곳은 두 곳뿐입니다.
   1. **YouTube (www.youtube.com)**: 사용자가 보고 있는 영상의 댓글을 더 불러오기 위해, 그 페이지가 평소 쓰는 것과 같은 방식으로 요청합니다.
   2. **Hugging Face (huggingface.co와 그 파일 서버)**: 의미 분석 모델 파일(공개 모델 가중치)을 처음 한 번 내려받습니다. 이 요청에는 댓글이나 영상 정보가 들어가지 않습니다. Hugging Face는 일반 웹 요청처럼 IP 주소 등 접속 기록을 남길 수 있으며, 이는 [Hugging Face 개인정보처리방침](https://huggingface.co/privacy)을 따릅니다.
-- 내려받은 모델 파일은 다음에 다시 받지 않도록 브라우저의 캐시 저장소(Cache Storage)에 남습니다. 모델 파일일 뿐 사용자 정보는 들어 있지 않습니다. 확장을 지우거나 브라우저의 사이트 데이터 지우기로 없앨 수 있습니다.
+- 내려받은 모델 파일은 다음에 다시 받지 않도록 브라우저의 캐시 저장소(Cache Storage)에 남습니다. 모델 파일일 뿐 사용자 정보는 들어 있지 않습니다. 이 캐시는 확장 자신의 저장 공간에 있어 **확장을 지우면 함께 지워집니다**. 브라우저의 일반 '인터넷 사용 기록 삭제'로는 지워지지 않을 수 있습니다.
 - 분석 도구, 광고, 추적 코드를 넣지 않았습니다.
 
 ### 5. 작성자 이름
@@ -81,7 +81,7 @@ The information is used only to group comments by topic, draw them as a map, and
 - The extension connects to only two places:
   1. **YouTube (www.youtube.com)**: to load more comments of the video the user is viewing, using the same requests the page itself makes.
   2. **Hugging Face (huggingface.co and its file servers)**: to download the semantic model files (public model weights) once. These requests contain no comments or video information. Like any web request, Hugging Face may log the IP address and similar access data under the [Hugging Face Privacy Policy](https://huggingface.co/privacy).
-- Downloaded model files stay in the browser's Cache Storage so they are not downloaded again. They contain no user information and are removed by uninstalling the extension or clearing site data.
+- Downloaded model files stay in the browser's Cache Storage so they are not downloaded again. They contain no user information. The cache belongs to the extension itself, so **it is deleted when the extension is removed**; the browser's general "clear browsing data" may not remove it.
 - The extension contains no analytics, advertising, or tracking code.
 
 ### 5. Author names
